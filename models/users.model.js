@@ -20,8 +20,13 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
       },
       role: {
-        type: DataTypes.ENUM("super", "admin", "user"),
-        defaultValue: "user",
+        type: DataTypes.ENUM(
+          "super",
+          "admin",
+          "Data entry",
+          "sales representative"
+        ),
+        defaultValue: "sales representative",
         allowNull: false,
       },
       first_name: {
@@ -33,6 +38,9 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
       },
       phone_number: {
+        type: DataTypes.STRING(20),
+      },
+      emergency_contact: {
         type: DataTypes.STRING(20),
       },
       notes: {

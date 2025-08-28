@@ -19,6 +19,7 @@ module.exports = {
           first_name: "Super",
           last_name: "Admin",
           phone_number: "+1-555-0123",
+          emergency_contact: "+1-555-9999",
           notes: "Super administrator account with full access",
           street_address: "123 Admin Street",
           city: "Admin City",

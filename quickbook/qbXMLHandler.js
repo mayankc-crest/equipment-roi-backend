@@ -43,6 +43,47 @@ class QBXMLHandler {
       ignoreAttributes: false,
       attributeNamePrefix: "@_",
     });
+
+    // Initialize sync counter for numbered log files
+    this.syncCounter = 0;
+    this.initializeSyncCounter();
+  }
+
+  /**
+   * Initialize sync counter by reading existing log files
+   */
+  initializeSyncCounter() {
+    try {
+      const logsDir = path.join(__dirname, "..", "logs");
+
+      if (fs.existsSync(logsDir)) {
+        // Read all existing log files to find the highest number
+        const files = fs
+          .readdirSync(logsDir)
+          .filter((file) => file.match(/^timestamp_\d+\.xml$/))
+          .map((file) => {
+            const match = file.match(/^timestamp_(\d+)\.xml$/);
+            return match ? parseInt(match[1]) : 0;
+          })
+          .sort((a, b) => b - a); // Sort in descending order
+
+        if (files.length > 0) {
+          this.syncCounter = files[0]; // Set to highest existing number
+          console.log(`📊 Sync counter initialized to: ${this.syncCounter}`);
+        } else {
+          this.syncCounter = 0;
+          console.log(`📊 Sync counter initialized to: 0 (no existing logs)`);
+        }
+      } else {
+        this.syncCounter = 0;
+        console.log(
+          `📊 Sync counter initialized to: 0 (logs directory doesn't exist)`
+        );
+      }
+    } catch (error) {
+      console.error("❌ Error initializing sync counter:", error);
+      this.syncCounter = 0;
+    }
   }
 
   /**
@@ -60,7 +101,7 @@ class QBXMLHandler {
       // Check if we have more items to fetch
       if (this.itemPagination.hasMoreItems) {
         // Only add Item query - focusing on item sync only
-        this.addItemQuery();
+        // this.addItemQuery();
         console.log(
           `Generated ${this.requestQueue.length} qbXML requests (Items only)`
         );
@@ -71,9 +112,12 @@ class QBXMLHandler {
         );
       }
 
-      // Customer and Invoice queries removed as requested
+      // Add Customer query
       // this.addCustomerQuery();
+      // Add Invoice query with line items to get detailed transaction data
       // this.addInvoiceQuery();
+      // Add Estimate query with line items if you need estimates
+      // this.addEstimateQuery();
       // this.addVendorQuery();
 
       // You can also add custom requests based on your business logic
@@ -143,7 +187,7 @@ class QBXMLHandler {
 <QBXML>
     <QBXMLMsgsRq onError="stopOnError">
         <CustomerQueryRq requestID="1">
-            <MaxReturned>100</MaxReturned>
+            <MaxReturned>1000</MaxReturned>
             <ActiveStatus>All</ActiveStatus>
         </CustomerQueryRq>
     </QBXMLMsgsRq>
@@ -161,11 +205,11 @@ class QBXMLHandler {
 <QBXML>
     <QBXMLMsgsRq onError="stopOnError">
         <InvoiceQueryRq requestID="2">
-            <MaxReturned>50</MaxReturned>
             <TxnDateRangeFilter>
                 <FromTxnDate>2024-01-01</FromTxnDate>
                 <ToTxnDate>2024-12-31</ToTxnDate>
             </TxnDateRangeFilter>
+            <IncludeLineItems>true</IncludeLineItems>
         </InvoiceQueryRq>
     </QBXMLMsgsRq>
 </QBXML>`;
@@ -183,7 +227,6 @@ class QBXMLHandler {
 <QBXML>
     <QBXMLMsgsRq onError="stopOnError">
         <ItemQueryRq requestID="1739">
-            <MaxReturned>5</MaxReturned>
             <ActiveStatus>ActiveOnly</ActiveStatus>
         </ItemQueryRq>
     </QBXMLMsgsRq>
@@ -295,11 +338,17 @@ class QBXMLHandler {
    */
   processResponse(response) {
     try {
-      // Only process Item responses - focusing on item sync only
+      // Process different types of responses
       if (response.includes("<ItemQueryRs")) {
         this.handleItemQueryResponse(response);
+      } else if (response.includes("<CustomerQueryRs")) {
+        this.handleCustomerQueryResponse(response);
+      } else if (response.includes("<InvoiceQueryRs")) {
+        this.handleInvoiceQueryResponse(response);
       } else {
-        console.log("Non-item response received - skipping processing");
+        console.log(
+          "Non-item/customer/invoice response received - skipping processing"
+        );
       }
 
       // Save response to file for debugging
@@ -355,6 +404,654 @@ class QBXMLHandler {
   }
 
   /**
+   * Extract customer data from XML
+   *
+   * @param {Object} customerData - Raw customer data from XML
+   * @returns {Object} Processed customer object
+   */
+  extractCustomerData(customerData) {
+    try {
+      const customer = {
+        listID: customerData.ListID || "",
+        name: customerData.Name || "",
+        fullName: customerData.FullName || customerData.Name || "",
+        companyName: customerData.CompanyName || "",
+        firstName: customerData.FirstName || "",
+        lastName: customerData.LastName || "",
+        isActive: customerData.IsActive !== "false",
+        phone: customerData.Phone || "",
+        email: customerData.Email || "",
+        address1: "",
+        address2: "",
+        city: "",
+        state: "",
+        postalCode: "",
+        country: "",
+      };
+
+      // Extract address information
+      if (customerData.BillAddress) {
+        customer.address1 = customerData.BillAddress.Addr1 || "";
+        customer.address2 = customerData.BillAddress.Addr2 || "";
+        customer.city = customerData.BillAddress.City || "";
+        customer.state = customerData.BillAddress.State || "";
+        customer.postalCode = customerData.BillAddress.PostalCode || "";
+        customer.country = customerData.BillAddress.Country || "";
+      }
+
+      console.log(
+        `�� Extracted customer: ${customer.name} - Company: ${customer.companyName}, Email: ${customer.email}`
+      );
+      return customer;
+    } catch (error) {
+      console.error(`❌ Error extracting customer data:`, error);
+      return {
+        listID: "",
+        name: "Error Processing Customer",
+        fullName: "Error Processing Customer",
+        companyName: "",
+        firstName: "",
+        lastName: "",
+        isActive: false,
+        phone: "",
+        email: "",
+        address1: "",
+        address2: "",
+        city: "",
+        state: "",
+        postalCode: "",
+        country: "",
+      };
+    }
+  }
+
+  /**
+   * Parse customer XML response from QuickBooks
+   *
+   * @param {string} xmlString - qbXML response string
+   * @returns {Array} Array of customer objects
+   */
+  parseCustomerXML(xmlString) {
+    try {
+      const customers = [];
+
+      // Parse XML using fast-xml-parser
+      const parsed = this.xmlParser.parse(xmlString);
+
+      // Navigate to the customer response
+      const customerResponse = parsed?.QBXML?.QBXMLMsgsRs?.CustomerQueryRs;
+
+      if (!customerResponse) {
+        console.log("⚠️ No CustomerQueryRs found in response");
+        return customers;
+      }
+
+      // Handle customer data
+      let customerList = customerResponse.CustomerRet;
+
+      if (customerList) {
+        // Handle both single customer and multiple customers
+        const customersArray = Array.isArray(customerList)
+          ? customerList
+          : [customerList];
+
+        customersArray.forEach((customerData) => {
+          const customer = this.extractCustomerData(customerData);
+          if (customer.name) {
+            // Only add customers with names
+            customers.push(customer);
+          }
+        });
+      }
+
+      console.log(
+        `📊 Successfully parsed ${customers.length} customers from XML response`
+      );
+      return customers;
+    } catch (error) {
+      console.error("❌ Error parsing customer XML:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Save parsed customer data to file for debugging and analysis
+   */
+  saveParsedCustomerDataToFile(customers, originalXML) {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const filename = `parsed_customers_${this.syncCounter}.json`;
+      const filepath = path.join(__dirname, "..", "logs", filename);
+
+      // Ensure logs directory exists
+      const logsDir = path.dirname(filepath);
+      if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir, { recursive: true });
+      }
+
+      const parsedData = {
+        syncNumber: this.syncCounter,
+        timestamp: new Date().toISOString(),
+        totalCustomers: customers.length,
+        customers: customers,
+        originalXMLLength: originalXML.length,
+        parsingSummary: {
+          customersWithListID: customers.filter((customer) => customer.listID)
+            .length,
+          customersWithName: customers.filter((customer) => customer.name)
+            .length,
+          customersWithEmail: customers.filter((customer) => customer.email)
+            .length,
+          customersWithPhone: customers.filter((customer) => customer.phone)
+            .length,
+          customersWithAddress: customers.filter(
+            (customer) => customer.address1
+          ).length,
+        },
+      };
+
+      fs.writeFileSync(filepath, JSON.stringify(parsedData, null, 2), "utf8");
+      console.log(
+        `📁 Parsed customer data saved to: ${filename} (Sync #${this.syncCounter})`
+      );
+    } catch (error) {
+      console.error("❌ Error saving parsed customer data to file:", error);
+    }
+  }
+
+  /**
+   * Sync customers from QuickBooks to database
+   *
+   * @param {string} response - qbXML response containing customers
+   */
+  async syncCustomersToDatabase(response) {
+    try {
+      console.log("💾 Syncing customers to database...");
+
+      // First, parse the XML response to extract customers
+      const customers = this.parseCustomerXML(response);
+
+      if (!customers || customers.length === 0) {
+        console.log("⚠️ No customers found in XML response");
+        return;
+      }
+
+      console.log(`📊 Found ${customers.length} customers to process`);
+
+      // Import the Customer model
+      const db = require("../models");
+      const Customers = db.customers;
+
+      let createdCount = 0;
+      let updatedCount = 0;
+      let skippedCount = 0;
+
+      // Process each parsed customer
+      for (const customer of customers) {
+        try {
+          console.log(`🔄 Processing customer: ${customer.name || "Unknown"}`);
+
+          // Validate customer data
+          if (!customer.name) {
+            console.log(
+              `⚠️ Skipping customer with missing name: ${JSON.stringify(
+                customer
+              )}`
+            );
+            skippedCount++;
+            continue;
+          }
+
+          // Generate fallback ListID if missing
+          if (!customer.listID || customer.listID === "") {
+            customer.listID = `FALLBACK_${customer.name}_${Date.now()}`;
+            console.log(
+              `⚠️ Generated fallback ListID for customer: ${customer.name} -> ${customer.listID}`
+            );
+          }
+
+          // Check if customer already exists
+          const existingCustomer = await Customers.findOne({
+            where: { quickbook_list_id: customer.listID },
+          });
+
+          if (existingCustomer) {
+            // Update existing customer
+            await existingCustomer.update({
+              name: customer.name,
+              full_name: customer.fullName || customer.name,
+              company_name: customer.companyName || "",
+              first_name: customer.firstName || "",
+              last_name: customer.lastName || "",
+              is_active: customer.isActive !== false,
+              phone: customer.phone || "",
+              email: customer.email || "",
+              address1: customer.address1 || "",
+              address2: customer.address2 || "",
+              city: customer.city || "",
+              state: customer.state || "",
+              postal_code: customer.postalCode || "",
+              country: customer.country || "",
+              updated_at: new Date(),
+            });
+            console.log(`✅ Updated existing customer: ${customer.name}`);
+            updatedCount++;
+          } else {
+            // Create new customer
+            await Customers.create({
+              quickbook_list_id: customer.listID,
+              name: customer.name,
+              full_name: customer.fullName || customer.name,
+              company_name: customer.companyName || "",
+              first_name: customer.firstName || "",
+              last_name: customer.lastName || "",
+              is_active: customer.isActive !== false,
+              phone: customer.phone || "",
+              email: customer.email || "",
+              address1: customer.address1 || "",
+              address2: customer.address2 || "",
+              city: customer.city || "",
+              state: customer.state || "",
+              postal_code: customer.postalCode || "",
+              country: customer.country || "",
+              created_at: new Date(),
+              updated_at: new Date(),
+            });
+            console.log(`✅ Created new customer: ${customer.name}`);
+            createdCount++;
+          }
+        } catch (customerError) {
+          console.error(
+            `❌ Error processing customer ${customer.name || "Unknown"}:`,
+            customerError
+          );
+          skippedCount++;
+        }
+      }
+
+      // Log summary
+      console.log(
+        `📊 Customer Sync Summary: Created=${createdCount}, Updated=${updatedCount}, Skipped=${skippedCount}`
+      );
+      console.log(
+        `✅ Successfully synced ${customers.length} customers to database`
+      );
+
+      // Save parsed data to file for debugging
+      this.saveParsedCustomerDataToFile(customers, response);
+    } catch (error) {
+      console.error("❌ Error syncing customers to database:", error);
+    }
+  }
+
+  /**
+   * Extract invoice data from XML
+   *
+   * @param {Object} invoiceData - Raw invoice data from XML
+   * @returns {Object} Processed invoice object
+   */
+  extractInvoiceData(invoiceData) {
+    try {
+      const invoice = {
+        listID: invoiceData.TxnID || "",
+        txn_id: invoiceData.TxnID || null, // Add txn_id field
+        txn_number: invoiceData.TxnNumber
+          ? parseInt(invoiceData.TxnNumber)
+          : null, // Add txn_number field
+        refNumber: invoiceData.RefNumber || "",
+        txnDate: invoiceData.TxnDate || new Date().toISOString().split("T")[0],
+        dueDate: invoiceData.DueDate || null,
+        customerListID: "",
+        customerName: "",
+        customerFullName: "",
+        subtotal: 0.0,
+        totalAmount: 0.0,
+        balanceRemaining: 0.0,
+        memo: invoiceData.Memo || "",
+        isPaid: false,
+        isActive: invoiceData.IsActive !== "false",
+        invoiceLines: [],
+      };
+
+      // Extract customer information
+      if (invoiceData.CustomerRef) {
+        invoice.customerListID = invoiceData.CustomerRef.ListID || "";
+        invoice.customerName = invoiceData.CustomerRef.FullName || "";
+        invoice.customerFullName = invoiceData.CustomerRef.FullName || "";
+      }
+
+      // Extract financial amounts
+      if (invoiceData.Subtotal) {
+        invoice.subtotal = parseFloat(invoiceData.Subtotal) || 0.0;
+      }
+      if (invoiceData.TotalAmount) {
+        invoice.totalAmount = parseFloat(invoiceData.TotalAmount) || 0.0;
+      }
+      if (invoiceData.BalanceRemaining) {
+        invoice.balanceRemaining =
+          parseFloat(invoiceData.BalanceRemaining) || 0.0;
+        invoice.isPaid = invoice.balanceRemaining <= 0;
+      }
+
+      // Extract invoice line items
+      if (invoiceData.InvoiceLineRet) {
+        const lines = Array.isArray(invoiceData.InvoiceLineRet)
+          ? invoiceData.InvoiceLineRet
+          : [invoiceData.InvoiceLineRet];
+
+        lines.forEach((line, index) => {
+          const invoiceLine = {
+            lineNumber: index + 1,
+            itemListID: "",
+            itemName: "",
+            description: line.Desc || "",
+            quantity: parseFloat(line.Qty) || 1.0,
+            unitPrice: parseFloat(line.Rate) || 0.0,
+            amount: parseFloat(line.Amount) || 0.0,
+          };
+
+          // Extract item information
+          if (line.ItemRef) {
+            invoiceLine.itemListID = line.ItemRef.ListID || "";
+            invoiceLine.itemName = line.ItemRef.FullName || "";
+          }
+
+          invoice.invoiceLines.push(invoiceLine);
+        });
+      }
+
+      console.log(
+        `📄 Extracted invoice: ${invoice.refNumber} - Customer: ${invoice.customerName}, Amount: $${invoice.totalAmount}, Lines: ${invoice.invoiceLines.length}`
+      );
+      return invoice;
+    } catch (error) {
+      console.error(`❌ Error extracting invoice data:`, error);
+      return {
+        listID: "",
+        refNumber: "Error Processing Invoice",
+        txnDate: new Date().toISOString().split("T")[0],
+        dueDate: null,
+        customerListID: "",
+        customerName: "Error Processing Invoice",
+        customerFullName: "Error Processing Invoice",
+        subtotal: 0.0,
+        totalAmount: 0.0,
+        balanceRemaining: 0.0,
+        memo: "",
+        isPaid: false,
+        isActive: false,
+        invoiceLines: [],
+      };
+    }
+  }
+
+  /**
+   * Parse invoice XML response from QuickBooks
+   *
+   * @param {string} xmlString - qbXML response string
+   * @returns {Array} Array of invoice objects
+   */
+  parseInvoiceXML(xmlString) {
+    try {
+      const invoices = [];
+
+      // Parse XML using fast-xml-parser
+      const parsed = this.xmlParser.parse(xmlString);
+
+      // Navigate to the invoice response
+      const invoiceResponse = parsed?.QBXML?.QBXMLMsgsRs?.InvoiceQueryRs;
+
+      if (!invoiceResponse) {
+        console.log("⚠️ No InvoiceQueryRs found in response");
+        return invoices;
+      }
+
+      // Handle invoice data
+      let invoiceList = invoiceResponse.InvoiceRet;
+
+      if (invoiceList) {
+        // Handle both single invoice and multiple invoices
+        const invoicesArray = Array.isArray(invoiceList)
+          ? invoiceList
+          : [invoiceList];
+
+        invoicesArray.forEach((invoiceData) => {
+          const invoice = this.extractInvoiceData(invoiceData);
+          if (
+            invoice.refNumber &&
+            invoice.refNumber !== "Error Processing Invoice"
+          ) {
+            // Only add invoices with valid reference numbers
+            invoices.push(invoice);
+          }
+        });
+      }
+
+      console.log(
+        `📊 Successfully parsed ${invoices.length} invoices from XML response`
+      );
+      return invoices;
+    } catch (error) {
+      console.error("❌ Error parsing invoice XML:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Save parsed invoice data to file for debugging and analysis
+   */
+  saveParsedInvoiceDataToFile(invoices, originalXML) {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const filename = `parsed_invoices_${this.syncCounter}.json`;
+      const filepath = path.join(__dirname, "..", "logs", filename);
+
+      // Ensure logs directory exists
+      const logsDir = path.dirname(filepath);
+      if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir, { recursive: true });
+      }
+
+      const parsedData = {
+        syncNumber: this.syncCounter,
+        timestamp: new Date().toISOString(),
+        totalInvoices: invoices.length,
+        invoices: invoices,
+        originalXMLLength: originalXML.length,
+        parsingSummary: {
+          invoicesWithListID: invoices.filter((invoice) => invoice.listID)
+            .length,
+          invoicesWithRefNumber: invoices.filter((invoice) => invoice.refNumber)
+            .length,
+          invoicesWithCustomer: invoices.filter(
+            (invoice) => invoice.customerListID
+          ).length,
+          invoicesWithLines: invoices.filter(
+            (invoice) => invoice.invoiceLines.length > 0
+          ).length,
+          totalInvoiceLines: invoices.reduce(
+            (sum, invoice) => sum + invoice.invoiceLines.length,
+            0
+          ),
+          paidInvoices: invoices.filter((invoice) => invoice.isPaid).length,
+          unpaidInvoices: invoices.filter((invoice) => !invoice.isPaid).length,
+        },
+      };
+
+      fs.writeFileSync(filepath, JSON.stringify(parsedData, null, 2), "utf8");
+      console.log(
+        `📁 Parsed invoice data saved to: ${filename} (Sync #${this.syncCounter})`
+      );
+    } catch (error) {
+      console.error("❌ Error saving parsed invoice data to file:", error);
+    }
+  }
+
+  /**
+   * Sync invoices from QuickBooks to database
+   *
+   * @param {string} response - qbXML response containing invoices
+   */
+  async syncInvoicesToDatabase(response) {
+    try {
+      console.log("💾 Syncing invoices to database...");
+
+      // First, parse the XML response to extract invoices
+      const invoices = this.parseInvoiceXML(response);
+
+      if (!invoices || invoices.length === 0) {
+        console.log("⚠️ No invoices found in XML response");
+        return;
+      }
+
+      console.log(`📊 Found ${invoices.length} invoices to process`);
+
+      // Import the Invoice model
+      const db = require("../models");
+      const Invoices = db.invoices;
+
+      let createdCount = 0;
+      let updatedCount = 0;
+      let skippedCount = 0;
+
+      // Process each parsed invoice
+      for (const invoice of invoices) {
+        try {
+          console.log(
+            `🔄 Processing invoice: ${invoice.refNumber || "Unknown"}`
+          );
+
+          // Validate invoice data
+          if (
+            !invoice.refNumber ||
+            invoice.refNumber === "Error Processing Invoice"
+          ) {
+            console.log(
+              `⚠️ Skipping invoice with missing reference number: ${JSON.stringify(
+                invoice
+              )}`
+            );
+            skippedCount++;
+            continue;
+          }
+
+          // Generate fallback ListID if missing
+          if (!invoice.listID || invoice.listID === "") {
+            invoice.listID = `FALLBACK_INV_${invoice.refNumber}_${Date.now()}`;
+            console.log(
+              `⚠️ Generated fallback ListID for invoice: ${invoice.refNumber} -> ${invoice.listID}`
+            );
+          }
+
+          // Find the customer by QuickBooks ListID
+          let customerId = null;
+          if (invoice.customerListID) {
+            const customer = await db.customers.findOne({
+              where: { quickbook_list_id: invoice.customerListID },
+            });
+            if (customer) {
+              customerId = customer.id;
+              console.log(
+                `  🔗 Found customer: ${customer.name} (ID: ${customerId})`
+              );
+            } else {
+              console.log(
+                `  ⚠️ Customer not found for ListID: ${invoice.customerListID}`
+              );
+            }
+          }
+
+          // Check if invoice already exists
+          const existingInvoice = await Invoices.findOne({
+            where: { quickbook_list_id: invoice.listID },
+          });
+
+          if (existingInvoice) {
+            // Update existing invoice
+            await existingInvoice.update({
+              txn_id: invoice.txn_id,
+              txn_number: invoice.txn_number,
+              ref_number: invoice.refNumber,
+              txn_date: invoice.txnDate,
+              due_date: invoice.dueDate,
+              customer_list_id: invoice.customerListID,
+              customer_id: customerId,
+              customer_name: invoice.customerName,
+              customer_full_name: invoice.customerFullName,
+              subtotal: invoice.subtotal,
+              total_amount: invoice.totalAmount,
+              balance_remaining: invoice.balanceRemaining,
+              memo: invoice.memo,
+              is_paid: invoice.isPaid,
+              is_active: invoice.isActive,
+              // updatedAt will be automatically set by Sequelize
+            });
+            console.log(`✅ Updated existing invoice: ${invoice.refNumber}`);
+            updatedCount++;
+
+            // Handle invoice line items for updated invoice
+            if (invoice.invoiceLines.length > 0) {
+              await this.storeInvoiceLineItems(
+                invoice.invoiceLines,
+                existingInvoice.id
+              );
+            }
+          } else {
+            // Create new invoice
+            const newInvoice = await Invoices.create({
+              quickbook_list_id: invoice.listID,
+              txn_id: invoice.txn_id,
+              txn_number: invoice.txn_number,
+              ref_number: invoice.refNumber,
+              txn_date: invoice.txnDate,
+              due_date: invoice.dueDate,
+              customer_list_id: invoice.customerListID,
+              customer_id: customerId,
+              customer_name: invoice.customerName,
+              customer_full_name: invoice.customerFullName,
+              subtotal: invoice.subtotal,
+              total_amount: invoice.totalAmount,
+              balance_remaining: invoice.balanceRemaining,
+              memo: invoice.memo,
+              is_paid: invoice.isPaid,
+              is_active: invoice.isActive,
+              // createdAt and updatedAt will be automatically set by Sequelize
+            });
+            console.log(`✅ Created new invoice: ${invoice.refNumber}`);
+            createdCount++;
+
+            // Handle invoice line items for newly created invoice
+            if (invoice.invoiceLines.length > 0) {
+              await this.storeInvoiceLineItems(
+                invoice.invoiceLines,
+                newInvoice.id
+              );
+            }
+          }
+        } catch (invoiceError) {
+          console.error(
+            `❌ Error processing invoice ${invoice.refNumber || "Unknown"}:`,
+            invoiceError
+          );
+          skippedCount++;
+        }
+      }
+
+      // Log summary
+      console.log(
+        `📊 Invoice Sync Summary: Created=${createdCount}, Updated=${updatedCount}, Skipped=${skippedCount}`
+      );
+      console.log(
+        `✅ Successfully synced ${invoices.length} invoices to database`
+      );
+
+      // Save parsed data to file for debugging
+      this.saveParsedInvoiceDataToFile(invoices, response);
+    } catch (error) {
+      console.error("❌ Error syncing invoices to database:", error);
+    }
+  }
+  /**
    * Handle customer query response
    *
    * @param {string} response - Customer query response
@@ -363,6 +1060,7 @@ class QBXMLHandler {
     console.log("Processing customer query response");
     // Implement your customer data processing logic here
     // You might want to parse the XML and store in database
+    this.syncCustomersToDatabase(response);
   }
 
   /**
@@ -372,7 +1070,8 @@ class QBXMLHandler {
    */
   handleInvoiceQueryResponse(response) {
     console.log("Processing invoice query response");
-    // Implement your invoice data processing logic here
+    // Sync invoices to database
+    this.syncInvoicesToDatabase(response);
   }
 
   /**
@@ -397,116 +1096,204 @@ class QBXMLHandler {
    */
   async syncItemsToDatabase(response) {
     try {
-      console.log("🔄 Syncing items to database...");
+      console.log("💾 Syncing items to database...");
 
-      // Parse the qbXML response to extract item data
+      // First, parse the XML response to extract items
       const items = this.parseItemXML(response);
 
-      if (items && items.length > 0) {
-        // Import the Product model
-        const { sequelize } = require("../models");
-        const Product = require("../models/products.model")(
-          sequelize,
-          sequelize.Sequelize.DataTypes
-        );
-
-        let createdCount = 0;
-        let updatedCount = 0;
-        let skippedCount = 0;
-
-        for (const item of items) {
-          try {
-            // Validate item data before processing
-            if (!item.listID || !item.name) {
-              console.log(
-                `⚠️ Skipping item with missing data: ListID=${item.listID}, Name=${item.name}`
-              );
-              skippedCount++;
-              continue;
-            }
-
-            // Check if item already exists by quickbook_list_id (primary duplicate check)
-            const existingItem = await Product.findOne({
-              where: { quickbook_list_id: item.listID },
-            });
-
-            if (existingItem) {
-              // Update existing item - prevents duplicates
-              await existingItem.update({
-                name: item.name,
-                full_name: item.fullName,
-                description: item.description,
-                price: item.price,
-                is_active: item.isActive,
-                account_name: item.accountName,
-                updated_at: new Date(), // Track when item was last updated
-              });
-              console.log(
-                `✅ Updated existing item: ${item.name} (ListID: ${item.listID})`
-              );
-              updatedCount++;
-            } else {
-              // Additional check: Check if item exists by name (secondary duplicate check)
-              const existingByName = await Product.findOne({
-                where: { name: item.name },
-              });
-
-              if (existingByName) {
-                console.log(
-                  `⚠️ Item with name "${item.name}" already exists but different ListID. Skipping to prevent duplicates.`
-                );
-                skippedCount++;
-                continue;
-              }
-
-              // Create new item - no duplicates found
-              await Product.create({
-                quickbook_list_id: item.listID,
-                name: item.name,
-                full_name: item.fullName,
-                description: item.description,
-                price: item.price,
-                is_active: item.isActive,
-                account_name: item.accountName,
-                created_at: new Date(),
-                updated_at: new Date(),
-              });
-              console.log(
-                `✅ Created new item: ${item.name} (ListID: ${item.listID})`
-              );
-              createdCount++;
-            }
-          } catch (itemError) {
-            console.error(`❌ Error processing item ${item.name}:`, itemError);
-            skippedCount++;
-          }
-        }
-
-        // Update pagination tracking
-        this.itemPagination.totalItemsProcessed += items.length;
-
-        // For now, we'll just fetch the same 5 items repeatedly
-        // This ensures we don't get "no matching object" errors
-        // In a production system, you might want to implement more sophisticated pagination
-        console.log(`📊 Processed ${items.length} items in this batch`);
-        console.log(
-          `📊 Total items processed: ${this.itemPagination.totalItemsProcessed}`
-        );
-
-        // Log summary
-        console.log(
-          `📊 Sync Summary: Created=${createdCount}, Updated=${updatedCount}, Skipped=${skippedCount}`
-        );
-
-        console.log(`✅ Successfully synced ${items.length} items to database`);
-        console.log(
-          `📊 Total items processed so far: ${this.itemPagination.totalItemsProcessed}`
-        );
-      } else {
-        console.log("ℹ️ No items found in response");
+      if (!items || items.length === 0) {
+        console.log("⚠️ No items found in XML response");
+        return;
       }
+
+      console.log(`📊 Found ${items.length} items to process`);
+
+      // Import the Product model
+      const db = require("../models");
+      const Products = db.products;
+
+      let createdCount = 0;
+      let updatedCount = 0;
+      let skippedCount = 0;
+
+      // Process each parsed item
+      for (const item of items) {
+        try {
+          console.log(`🔄 Processing item: ${item.name || "Unknown"}`);
+
+          // Validate item data
+          if (!item.name) {
+            console.log(
+              `⚠️ Skipping item with missing name: ${JSON.stringify(item)}`
+            );
+            skippedCount++;
+            continue;
+          }
+
+          // Generate fallback ListID if missing
+          if (!item.listID || item.listID === "") {
+            item.listID = `FALLBACK_${item.name}_${Date.now()}`;
+            console.log(
+              `⚠️ Generated fallback ListID for item: ${item.name} -> ${item.listID}`
+            );
+          }
+
+          // Check if item already exists
+          const existingItem = await Products.findOne({
+            where: { quickbook_list_id: item.listID },
+          });
+
+          if (existingItem) {
+            // Update existing item
+            await existingItem.update({
+              name: item.name,
+              full_name: item.fullName || item.name,
+              description: item.description || "",
+              price: item.price || 0.0,
+              is_active: item.isActive !== false, // Default to true if not specified
+              account_name: item.accountName || "",
+              updated_at: new Date(),
+            });
+            console.log(`✅ Updated existing item: ${item.name}`);
+            updatedCount++;
+          } else {
+            // Create new item
+            await Products.create({
+              quickbook_list_id: item.listID,
+              name: item.name,
+              full_name: item.fullName || item.name,
+              description: item.description || "",
+              price: item.price || 0.0,
+              is_active: item.isActive !== false, // Default to true if not specified
+              account_name: item.accountName || "",
+              created_at: new Date(),
+              updated_at: new Date(),
+            });
+            console.log(`✅ Created new item: ${item.name}`);
+            createdCount++;
+          }
+        } catch (itemError) {
+          console.error(
+            `❌ Error processing item ${item.name || "Unknown"}:`,
+            itemError
+          );
+          skippedCount++;
+        }
+      }
+
+      // Log summary
+      console.log(
+        `📊 Sync Summary: Created=${createdCount}, Updated=${updatedCount}, Skipped=${skippedCount}`
+      );
+      console.log(`✅ Successfully synced ${items.length} items to database`);
+
+      // Save parsed data to file for debugging
+      this.saveParsedDataToFile(items, response);
     } catch (error) {
       console.error("❌ Error syncing items to database:", error);
+    }
+  }
+
+  /**
+   * Extract item data based on item type
+   *
+   * @param {Object} itemData - Raw item data from XML
+   * @param {string} itemType - Type of item (ItemServiceRet, ItemNonInventoryRet, etc.)
+   * @returns {Object} Processed item object
+   */
+  extractItemData(itemData, itemType) {
+    try {
+      const item = {
+        listID: itemData.ListID || "",
+        name: itemData.Name || "",
+        fullName: itemData.FullName || itemData.Name || "",
+        isActive: itemData.IsActive !== "false",
+        type: itemType,
+        description: "",
+        price: 0.0,
+        accountName: "",
+      };
+
+      // Extract description, price, and account name based on item type
+      switch (itemType) {
+        case "ItemNonInventoryRet":
+          if (itemData.SalesOrPurchase) {
+            item.description = itemData.SalesOrPurchase.Desc || "";
+            item.price = parseFloat(itemData.SalesOrPurchase.Price || "0.00");
+            if (itemData.SalesOrPurchase.AccountRef) {
+              item.accountName =
+                itemData.SalesOrPurchase.AccountRef.FullName || "";
+            }
+          }
+          break;
+
+        case "ItemServiceRet":
+          if (itemData.SalesOrPurchase) {
+            item.description = itemData.SalesOrPurchase.Desc || "";
+            item.price = parseFloat(itemData.SalesOrPurchase.Price || "0.00");
+            if (itemData.SalesOrPurchase.AccountRef) {
+              item.accountName =
+                itemData.SalesOrPurchase.AccountRef.FullName || "";
+            }
+          }
+          break;
+
+        case "ItemInventoryRet":
+          if (itemData.SalesOrPurchase) {
+            item.description = itemData.SalesOrPurchase.Desc || "";
+            item.price = parseFloat(itemData.SalesOrPurchase.Price || "0.00");
+            if (itemData.SalesOrPurchase.AccountRef) {
+              item.accountName =
+                itemData.SalesOrPurchase.AccountRef.FullName || "";
+            }
+          }
+          break;
+
+        case "ItemOtherChargeRet":
+          if (itemData.SalesOrPurchase) {
+            item.description = itemData.SalesOrPurchase.Desc || "";
+            item.price = parseFloat(itemData.SalesOrPurchase.Price || "0.00");
+            if (itemData.SalesOrPurchase.AccountRef) {
+              item.accountName =
+                itemData.SalesOrPurchase.AccountRef.FullName || "";
+            }
+          }
+          break;
+
+        default:
+          // For other item types, try to extract common fields
+          if (itemData.SalesOrPurchase) {
+            item.description = itemData.SalesOrPurchase.Desc || "";
+            item.price = parseFloat(itemData.SalesOrPurchase.Price || "0.00");
+            if (itemData.SalesOrPurchase.AccountRef) {
+              item.accountName =
+                itemData.SalesOrPurchase.AccountRef.FullName || "";
+            }
+          }
+          break;
+      }
+
+      // Ensure price is a valid number
+      if (isNaN(item.price)) {
+        item.price = 0.0;
+      }
+
+      console.log(
+        `�� Extracted item: ${item.name} (${itemType}) - Price: ${item.price}, Desc: ${item.description}`
+      );
+      return item;
+    } catch (error) {
+      console.error(`❌ Error extracting item data for ${itemType}:`, error);
+      return {
+        listID: "",
+        name: "Error Processing Item",
+        fullName: "Error Processing Item",
+        isActive: false,
+        type: itemType,
+        description: "",
+        price: 0.0,
+        accountName: "",
+      };
     }
   }
 
@@ -523,58 +1310,54 @@ class QBXMLHandler {
       // Parse XML using fast-xml-parser
       const parsed = this.xmlParser.parse(xmlString);
 
-      // Navigate to the item list - handle both ItemRet and ItemServiceRet
-      let itemList = parsed?.QBXML?.QBXMLMsgsRs?.ItemQueryRs?.ItemRet;
+      // Navigate to the item response
+      const itemResponse = parsed?.QBXML?.QBXMLMsgsRs?.ItemQueryRs;
 
-      // If no ItemRet, try ItemServiceRet (which is what we're getting)
-      if (!itemList) {
-        itemList = parsed?.QBXML?.QBXMLMsgsRs?.ItemQueryRs?.ItemServiceRet;
+      if (!itemResponse) {
+        console.log("⚠️ No ItemQueryRs found in response");
+        return items;
       }
 
-      if (itemList) {
-        // Handle both single item and multiple items
-        const itemsArray = Array.isArray(itemList) ? itemList : [itemList];
+      // Handle different item types
+      const itemTypes = [
+        "ItemServiceRet",
+        "ItemInventoryRet",
+        "ItemNonInventoryRet",
+        "ItemOtherChargeRet",
+        "ItemSubtotalRet",
+        "ItemDiscountRet",
+        "ItemPaymentRet",
+        "ItemSalesTaxRet",
+        "ItemSalesTaxGroupRet",
+        "ItemGroupRet",
+        "ItemInventoryAssemblyRet",
+        "ItemFixedAssetRet",
+      ];
 
-        for (const itemData of itemsArray) {
-          const item = {
-            listID: itemData.ListID || "",
-            name: itemData.Name || "",
-            fullName: itemData.FullName || "",
-            description: itemData.SalesOrPurchase?.Desc || "",
-            price: parseFloat(itemData.SalesOrPurchase?.Price || 0),
-            isActive: itemData.IsActive === "true",
-            accountName: itemData.SalesOrPurchase?.AccountRef?.FullName || "",
-          };
+      // Process each item type
+      itemTypes.forEach((itemType) => {
+        let itemList = itemResponse[itemType];
 
-          items.push(item);
+        if (itemList) {
+          // Handle both single item and multiple items
+          const itemsArray = Array.isArray(itemList) ? itemList : [itemList];
+
+          itemsArray.forEach((itemData) => {
+            const item = this.extractItemData(itemData, itemType);
+            if (item.name) {
+              // Only add items with names
+              items.push(item);
+            }
+          });
         }
-      }
+      });
 
-      // Debug logging to see what we're actually parsing
-      console.log("🔍 XML Parsing Debug:");
-      console.log("  - Raw XML length:", xmlString.length);
-      console.log("  - Parsed object keys:", Object.keys(parsed || {}));
-      console.log("  - QBXML path:", parsed?.QBXML ? "✅ Found" : "❌ Missing");
       console.log(
-        "  - QBXMLMsgsRs path:",
-        parsed?.QBXML?.QBXMLMsgsRs ? "✅ Found" : "❌ Missing"
+        `📊 Successfully parsed ${items.length} items from XML response`
       );
-      console.log(
-        "  - ItemQueryRs path:",
-        parsed?.QBXML?.QBXMLMsgsRs?.ItemQueryRs ? "✅ Found" : "❌ Missing"
-      );
-      console.log(
-        "  - ItemServiceRet found:",
-        itemList
-          ? `✅ Found ${Array.isArray(itemList) ? itemList.length : 1} items`
-          : "❌ Missing"
-      );
-
-      console.log(`📊 Parsed ${items.length} items from XML response`);
       return items;
     } catch (error) {
       console.error("❌ Error parsing item XML:", error);
-      console.error("XML content:", xmlString.substring(0, 500) + "...");
       return [];
     }
   }
@@ -607,6 +1390,45 @@ class QBXMLHandler {
   handleInvoiceAddResponse(response) {
     console.log("Processing invoice add response");
     // Implement your invoice creation logic here
+  }
+
+  /**
+   * Save parsed data to file for debugging and analysis
+   */
+  saveParsedDataToFile(items, originalXML) {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const filename = `parsed_data_${this.syncCounter}.json`;
+      const filepath = path.join(__dirname, "..", "logs", filename);
+
+      // Ensure logs directory exists
+      const logsDir = path.dirname(filepath);
+      if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir, { recursive: true });
+      }
+
+      const parsedData = {
+        syncNumber: this.syncCounter,
+        timestamp: new Date().toISOString(),
+        totalItems: items.length,
+        items: items,
+        originalXMLLength: originalXML.length,
+        parsingSummary: {
+          itemsWithListID: items.filter((item) => item.listID).length,
+          itemsWithName: items.filter((item) => item.name).length,
+          itemsWithDescription: items.filter((item) => item.description).length,
+          itemsWithPrice: items.filter((item) => item.price > 0).length,
+          itemsWithAccountName: items.filter((item) => item.accountName).length,
+        },
+      };
+
+      fs.writeFileSync(filepath, JSON.stringify(parsedData, null, 2), "utf8");
+      console.log(
+        `📁 Parsed data saved to: ${filename} (Sync #${this.syncCounter})`
+      );
+    } catch (error) {
+      console.error("❌ Error saving parsed data to file:", error);
+    }
   }
 
   /**
@@ -847,6 +1669,83 @@ class QBXMLHandler {
     } else {
       console.log("🏁 No more items to fetch - pagination complete");
       return false;
+    }
+  }
+
+  /**
+   * Store invoice line items in the database
+   *
+   * @param {Array} lineItems - Array of line item objects
+   * @param {number} invoiceId - ID of the invoice
+   */
+  async storeInvoiceLineItems(lineItems, invoiceId) {
+    try {
+      console.log(
+        `📋 Storing ${lineItems.length} line items for invoice ID: ${invoiceId}`
+      );
+
+      // Import the InvoiceLineItem model
+      const db = require("../models");
+      const InvoiceLineItems = db.invoice_line_items;
+
+      // Store each line item
+      for (const lineItem of lineItems) {
+        try {
+          // Check if line item already exists
+          const existingLineItem = await InvoiceLineItems.findOne({
+            where: {
+              invoice_id: invoiceId,
+              line_number: lineItem.lineNumber,
+            },
+          });
+
+          // Find the product by QuickBooks ListID
+          const product = await db.products.findOne({
+            where: { quickbook_list_id: lineItem.itemListID },
+          });
+
+          if (!product) {
+            console.log(
+              `  ⚠️ Product not found for ListID: ${lineItem.itemListID}, skipping line item`
+            );
+            continue;
+          }
+
+          const lineItemData = {
+            invoice_id: invoiceId,
+            line_number: lineItem.lineNumber,
+            product_id: product.id,
+            quantity: lineItem.quantity,
+            unit_price: lineItem.unitPrice,
+            amount: lineItem.amount,
+          };
+
+          if (existingLineItem) {
+            // Update existing line item
+            await existingLineItem.update(lineItemData);
+            console.log(
+              `  ✅ Updated line item ${lineItem.lineNumber}: ${lineItem.itemName}`
+            );
+          } else {
+            // Create new line item
+            await InvoiceLineItems.create(lineItemData);
+            console.log(
+              `  ✅ Created line item ${lineItem.lineNumber}: ${lineItem.itemName}`
+            );
+          }
+        } catch (lineItemError) {
+          console.error(
+            `  ❌ Error processing line item ${lineItem.lineNumber}:`,
+            lineItemError
+          );
+        }
+      }
+
+      console.log(
+        `✅ Successfully processed ${lineItems.length} line items for invoice ID: ${invoiceId}`
+      );
+    } catch (error) {
+      console.error(`❌ Error storing invoice line items:`, error);
     }
   }
 

@@ -210,15 +210,15 @@ webService.QBWebConnectorSvc.QBWebConnectorSvcSoap.authenticate = function (
   var receivedPassword = args.strPassword ? args.strPassword.trim() : "";
 
   // Debug logging
-//   console.log("🔐 Authentication attempt:");
-//   console.log("   Expected username:", username);
-//   console.log("   Expected password:", password);
-//   console.log("   Received username:", args.strUserName);
-//   console.log("   Received password:", args.strPassword);
-//   console.log("   Trimmed received username:", receivedUsername);
-//   console.log("   Trimmed received password:", receivedPassword);
-//   console.log("   Username match:", receivedUsername === username);
-//   console.log("   Password match:", receivedPassword === password);
+  //   console.log("🔐 Authentication attempt:");
+  //   console.log("   Expected username:", username);
+  //   console.log("   Expected password:", password);
+  //   console.log("   Received username:", args.strUserName);
+  //   console.log("   Received password:", args.strPassword);
+  //   console.log("   Trimmed received username:", receivedUsername);
+  //   console.log("   Trimmed received password:", receivedPassword);
+  //   console.log("   Username match:", receivedUsername === username);
+  //   console.log("   Password match:", receivedPassword === password);
 
   if (receivedUsername === username && receivedPassword === password) {
     // Check if qbXMLHandler responds to method.
@@ -348,8 +348,11 @@ webService.QBWebConnectorSvc.QBWebConnectorSvcSoap.connectionError = function (
     timestamp: new Date().toISOString(),
   });
 
-  // Detailed error analysis
-  if (args.hresult === "0x80040408") {
+  // Handle specific QuickBooks startup error
+  if (
+    args.hresult === "0x80040408" ||
+    args.message.includes("Could not start QuickBooks")
+  ) {
     console.log("❌ ERROR DIAGNOSIS: QuickBooks Desktop is not accessible");
     console.log("💡 SOLUTIONS:");
     console.log("   1. Start QuickBooks Desktop as Administrator");
@@ -359,22 +362,22 @@ webService.QBWebConnectorSvc.QBWebConnectorSvcSoap.connectionError = function (
     );
     console.log("   4. Keep QuickBooks open and visible (don't minimize)");
     console.log("   5. Ensure no other QB processes are blocking access");
+
+    // For startup errors, suggest retry with delay
+    console.log("⏰ QuickBooks startup error - will retry in 30 seconds...");
+    console.log(
+      "💡 Please ensure QuickBooks Desktop is running and accessible"
+    );
+
+    // Return empty string to trigger retry
+    var retVal = ""; // Empty string means retry
+  } else {
+    // For other errors, stop retrying
+    console.log("🛑 Other QuickBooks error - stopping retry");
+    var retVal = "DONE"; // This stops the automatic retry
   }
 
   lastError = args.message;
-
-  // For specific QuickBooks errors, suggest retry with delay
-  var retVal = "DONE"; // Default to abort
-
-  if (args.message && args.message.includes("Could not start QuickBooks")) {
-    console.log(
-      "🔄 QuickBooks startup error detected - will retry in 30 seconds..."
-    );
-    console.log(
-      "⏰ Please ensure QuickBooks Desktop is running and accessible"
-    );
-    retVal = ""; // Empty string means retry
-  }
 
   callback({
     connectionErrorResult: { string: retVal },

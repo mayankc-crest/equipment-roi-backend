@@ -11,6 +11,13 @@ const router = express.Router();
 router.get("/", productsCtrl.getAllProducts);
 
 /**
+ * @description Get product statistics
+ * @path /api/products/stats
+ * @method GET
+ */
+router.get("/stats", productsCtrl.getProductStats);
+
+/**
  * @description Get product by ID`
  * @path /api/products/:id
  * @method GET

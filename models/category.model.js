@@ -1,5 +1,5 @@
 module.exports = (sequelize, DataTypes) => {
-  const Routes = sequelize.define(
+  const Category = sequelize.define(
     "categories",
     {
       id: {
@@ -28,5 +28,16 @@ module.exports = (sequelize, DataTypes) => {
     }
   );
 
-  return Routes;
+  // Define associations
+  Category.associate = (models) => {
+    // Many-to-many relationship with products through category_products junction table
+    Category.belongsToMany(models.products, {
+      through: "category_products",
+      foreignKey: "category_id",
+      otherKey: "product_id",
+      as: "products",
+    });
+  };
+
+  return Category;
 };

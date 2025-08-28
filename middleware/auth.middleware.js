@@ -82,6 +82,25 @@ class AuthMiddleware {
     return AuthMiddleware.requireRole(["admin", "super"])(req, res, next);
   }
 
+  // Check if user is data entry or higher
+  static requireDataEntry(req, res, next) {
+    return AuthMiddleware.requireRole(["Data entry", "admin", "super"])(
+      req,
+      res,
+      next
+    );
+  }
+
+  // Check if user is sales representative or higher
+  static requireSalesRep(req, res, next) {
+    return AuthMiddleware.requireRole([
+      "sales representative",
+      "Data entry",
+      "admin",
+      "super",
+    ])(req, res, next);
+  }
+
   // Optional authentication - attach user if token exists, but don't require it
   static optionalAuth(req, res, next) {
     try {

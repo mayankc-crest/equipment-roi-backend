@@ -23,13 +23,17 @@ class AuthController {
         state,
         country,
         zip_code,
-        role = "user",
+        role = "sales representative",
       } = req.body;
 
       // Check if user already exists
       const existingUser = await users.findOne({ where: { email } });
       if (existingUser) {
-        return sendErrorResponse(res, "User with this email already exists", 400);
+        return sendErrorResponse(
+          res,
+          "User with this email already exists",
+          400
+        );
       }
 
       // Hash password
@@ -67,10 +71,15 @@ class AuthController {
       const userResponse = user.toJSON();
       delete userResponse.password;
 
-      return sendSuccessRespose(res, {
-        user: userResponse,
-        token,
-      }, "User registered successfully", 201);
+      return sendSuccessRespose(
+        res,
+        {
+          user: userResponse,
+          token,
+        },
+        "User registered successfully",
+        201
+      );
     } catch (error) {
       console.error("Registration error:", error);
       return sendErrorResponse(res, "Registration failed", 500);
@@ -117,10 +126,15 @@ class AuthController {
       const userResponse = user.toJSON();
       delete userResponse.password;
 
-      return sendSuccessRespose(res, {
-        user: userResponse,
-        token,
-      }, "Login successful", 200);
+      return sendSuccessRespose(
+        res,
+        {
+          user: userResponse,
+          token,
+        },
+        "Login successful",
+        200
+      );
     } catch (error) {
       console.error("Login error:", error);
       return sendErrorResponse(res, "Login failed", 500);
@@ -139,7 +153,12 @@ class AuthController {
         return sendErrorResponse(res, "User not found", 404);
       }
 
-      return sendSuccessRespose(res, { user }, "Profile retrieved successfully", 200);
+      return sendSuccessRespose(
+        res,
+        { user },
+        "Profile retrieved successfully",
+        200
+      );
     } catch (error) {
       console.error("Get profile error:", error);
       return sendErrorResponse(res, "Failed to get profile", 500);
@@ -196,9 +215,14 @@ class AuthController {
       const userResponse = user.toJSON();
       delete userResponse.password;
 
-      return sendSuccessRespose(res, {
-        user: userResponse,
-      }, "Profile updated successfully", 200);
+      return sendSuccessRespose(
+        res,
+        {
+          user: userResponse,
+        },
+        "Profile updated successfully",
+        200
+      );
     } catch (error) {
       console.error("Update profile error:", error);
       return sendErrorResponse(res, "Failed to update profile", 500);
@@ -232,14 +256,15 @@ class AuthController {
       // Update password
       await user.update({ password: hashedNewPassword });
 
-      return sendSuccessRespose(res, null, "Password changed successfully", 200);
+      return sendSuccessRespose(
+        res,
+        null,
+        "Password changed successfully",
+        200
+      );
     } catch (error) {
       console.error("Change password error:", error);
-      return sendErrorResponse(
-        res,
-        "Failed to change password",
-        500
-      );
+      return sendErrorResponse(res, "Failed to change password", 500);
     }
   }
 

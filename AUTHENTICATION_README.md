@@ -74,7 +74,7 @@ Register a new user account.
   "state": "NY",
   "country": "United States",
   "zip_code": "10001",
-  "role": "user"
+  "role": "sales representative"
 }
 ```
 
@@ -229,9 +229,10 @@ router.get(
 
 ### Role-Based Access Control
 
-- **super**: Full access to all features
+- **super**: Full access to all features and system administration
 - **admin**: Access to admin features and user management
-- **user**: Basic access to user features
+- **Data entry**: Access to data entry and modification features
+- **sales representative**: Basic access to sales and customer features (default role)
 
 ## Environment Variables
 
