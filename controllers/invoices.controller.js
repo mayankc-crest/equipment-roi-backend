@@ -1,4 +1,8 @@
-const { invoices: Invoices } = require("../models");
+const {
+  invoices: Invoices,
+  invoice_line_items: InvoiceLineItems,
+  products: Products,
+} = require("../models");
 const { sendSuccessRespose, sendErrorResponse } = require("../utils/response");
 const Sequelize = require("sequelize");
 
@@ -7,6 +11,7 @@ exports.getAllInvoices = async (req, res) => {
     const { page = 1, limit = 10, is_paid, search } = req.query;
     const offset = (page - 1) * limit;
 
+    console.log("get All Invoices controller has been called:::");
     // Build where clause
     const whereClause = {};
     if (is_paid !== undefined) whereClause.is_paid = is_paid;
@@ -68,17 +73,59 @@ exports.getAllInvoices = async (req, res) => {
 
 exports.getInvoiceById = async (req, res) => {
   try {
-    const invoice = await Invoices.findByPk(req.params.id);
+    const invoice = await Invoices.findByPk(req.params.id, {
+      include: [
+        {
+          model: InvoiceLineItems,
+          as: "lineItems",
+          include: [
+            {
+              model: Products,
+              as: "product",
+              attributes: [
+                "id",
+                "name",
+                "full_name",
+                "description",
+                "price",
+                "is_active",
+                "account_name",
+              ],
+            },
+          ],
+          attributes: ["id", "line_number", "quantity", "unit_price", "amount"],
+        },
+      ],
+    });
+
     if (!invoice) {
       return sendErrorResponse(res, "Invoice not found", 404);
     }
+
+    // Add invoice_type to the invoice and rename lineItems to invoice_line_items for consistency
+    const invoiceData = invoice.toJSON();
+    const invoiceWithType = {
+      ...invoiceData,
+      invoice_type: "qb_invoice",
+      invoice_line_items: invoiceData.lineItems || [], // Rename for frontend consistency
+    };
+
     return sendSuccessRespose(
       res,
-      invoice,
+      invoiceWithType,
       "Invoice fetched successfully",
       200
     );
   } catch (error) {
-    return sendErrorResponse(res, error.message);
+    console.error("Get invoice by ID error:", error);
+    return sendErrorResponse(res, "Failed to fetch invoice", 500);
   }
 };
+
+
+exports.getAllIDInvoices = async (req, res) => {
+  try{
+    
+  }
+  catch{}
+}

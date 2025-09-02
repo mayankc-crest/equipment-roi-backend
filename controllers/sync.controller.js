@@ -11,15 +11,27 @@ class SyncController {
     try {
       console.log("🔄 Manual sync items triggered via API");
 
-      const syncResult = await qbXMLHandler.syncItemsToDatabase("");
+      // Generate the item query request
+      const itemQuery = qbXMLHandler.addItemQuery();
+
+      // Get the request queue to see what was generated
+      const requests = [];
+      qbXMLHandler.fetchRequests((err, requestArray) => {
+        if (err) {
+          console.error("Error generating requests:", err);
+          return;
+        }
+        requests.push(...requestArray);
+      });
 
       res.status(200).json({
         success: true,
-        message: "Items sync completed successfully",
+        message:
+          "Item sync request generated successfully. QuickBooks Web Connector needs to be running to process the request.",
         data: {
-          itemsSynced: syncResult?.itemsSynced || 0,
-          itemsUpdated: syncResult?.itemsUpdated || 0,
-          totalItems: syncResult?.totalItems || 0,
+          requestGenerated: true,
+          requestCount: requests.length,
+          note: "The actual sync will happen when QuickBooks Web Connector processes the request and returns data",
         },
         timestamp: new Date().toISOString(),
       });
@@ -27,7 +39,7 @@ class SyncController {
       console.error("❌ Error in manual items sync:", error);
       res.status(500).json({
         success: false,
-        message: "Error syncing items",
+        message: "Error generating item sync request",
         error: error.message,
       });
     }
@@ -40,15 +52,27 @@ class SyncController {
     try {
       console.log("🔄 Manual sync customers triggered via API");
 
-      const syncResult = await qbXMLHandler.syncCustomersToDatabase("");
+      // Generate the customer query request
+      qbXMLHandler.addCustomerQuery();
+
+      // Get the request queue to see what was generated
+      const requests = [];
+      qbXMLHandler.fetchRequests((err, requestArray) => {
+        if (err) {
+          console.error("Error generating requests:", err);
+          return;
+        }
+        requests.push(...requestArray);
+      });
 
       res.status(200).json({
         success: true,
-        message: "Customers sync completed successfully",
+        message:
+          "Customer sync request generated successfully. QuickBooks Web Connector needs to be running to process the request.",
         data: {
-          customersSynced: syncResult?.customersSynced || 0,
-          customersUpdated: syncResult?.customersUpdated || 0,
-          totalCustomers: syncResult?.totalCustomers || 0,
+          requestGenerated: true,
+          requestCount: requests.length,
+          note: "The actual sync will happen when QuickBooks Web Connector processes the request and returns data",
         },
         timestamp: new Date().toISOString(),
       });
@@ -56,7 +80,7 @@ class SyncController {
       console.error("❌ Error in manual customers sync:", error);
       res.status(500).json({
         success: false,
-        message: "Error syncing customers",
+        message: "Error generating customer sync request",
         error: error.message,
       });
     }
@@ -69,17 +93,27 @@ class SyncController {
     try {
       console.log("🔄 Manual sync invoices triggered via API");
 
-      // Call the existing sync function with empty response data
-      const syncResult = await qbXMLHandler.syncInvoicesToDatabase("");
+      // Generate the invoice query request
+      qbXMLHandler.addInvoiceQuery();
+
+      // Get the request queue to see what was generated
+      const requests = [];
+      qbXMLHandler.fetchRequests((err, requestArray) => {
+        if (err) {
+          console.error("Error generating requests:", err);
+          return;
+        }
+        requests.push(...requestArray);
+      });
 
       res.status(200).json({
         success: true,
-        message: "Invoices sync completed successfully",
+        message:
+          "Invoice sync request generated successfully. QuickBooks Web Connector needs to be running to process the request.",
         data: {
-          invoicesSynced: syncResult?.invoicesSynced || 0,
-          invoicesUpdated: syncResult?.invoicesUpdated || 0,
-          totalInvoices: syncResult?.totalInvoices || 0,
-          lineItemsSynced: syncResult?.lineItemsSynced || 0,
+          requestGenerated: true,
+          requestCount: requests.length,
+          note: "The actual sync will happen when QuickBooks Web Connector processes the request and returns data",
         },
         timestamp: new Date().toISOString(),
       });
@@ -87,7 +121,7 @@ class SyncController {
       console.error("❌ Error in manual invoices sync:", error);
       res.status(500).json({
         success: false,
-        message: "Error syncing invoices",
+        message: "Error generating invoice sync request",
         error: error.message,
       });
     }
@@ -100,31 +134,34 @@ class SyncController {
     try {
       console.log("🔄 Manual sync all data triggered via API");
 
-      // Call all existing sync functions with empty response data
-      const itemsResult = await qbXMLHandler.syncItemsToDatabase("");
-      const customersResult = await qbXMLHandler.syncCustomersToDatabase("");
-      const invoicesResult = await qbXMLHandler.syncInvoicesToDatabase("");
+      // Generate all query requests
+      qbXMLHandler.addItemQuery();
+      qbXMLHandler.addCustomerQuery();
+      qbXMLHandler.addInvoiceQuery();
+
+      // Get the request queue to see what was generated
+      const requests = [];
+      qbXMLHandler.fetchRequests((err, requestArray) => {
+        if (err) {
+          console.error("Error generating requests:", err);
+          return;
+        }
+        requests.push(...requestArray);
+      });
 
       res.status(200).json({
         success: true,
-        message: "All data sync completed successfully",
+        message:
+          "All sync requests generated successfully. QuickBooks Web Connector needs to be running to process the requests.",
         data: {
-          items: {
-            itemsSynced: itemsResult?.itemsSynced || 0,
-            itemsUpdated: itemsResult?.itemsUpdated || 0,
-            totalItems: itemsResult?.totalItems || 0,
+          requestGenerated: true,
+          requestCount: requests.length,
+          requestsGenerated: {
+            items: true,
+            customers: true,
+            invoices: true,
           },
-          customers: {
-            customersSynced: customersResult?.customersSynced || 0,
-            customersUpdated: customersResult?.customersUpdated || 0,
-            totalCustomers: customersResult?.totalCustomers || 0,
-          },
-          invoices: {
-            invoicesSynced: invoicesResult?.invoicesSynced || 0,
-            invoicesUpdated: invoicesResult?.invoicesUpdated || 0,
-            totalInvoices: invoicesResult?.totalInvoices || 0,
-            lineItemsSynced: invoicesResult?.lineItemsSynced || 0,
-          },
+          note: "The actual sync will happen when QuickBooks Web Connector processes the requests and returns data",
         },
         timestamp: new Date().toISOString(),
       });
@@ -132,7 +169,7 @@ class SyncController {
       console.error("❌ Error in manual sync all:", error);
       res.status(500).json({
         success: false,
-        message: "Error syncing all data",
+        message: "Error generating sync requests",
         error: error.message,
       });
     }

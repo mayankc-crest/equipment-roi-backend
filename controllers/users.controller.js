@@ -84,8 +84,21 @@ class UsersController {
   // Get all users (admin/super only)
   static async getAllUsers(req, res) {
     try {
-      const { page = 1, limit = 10, role, is_active, search } = req.query;
-      const offset = (page - 1) * limit;
+      const {
+        page = 1,
+        limit = 10,
+        role,
+        is_active,
+        search,
+        all,
+        drawer,
+      } = req.query;
+
+      // Check if all users are requested
+      const getAllUsers = all === "true";
+
+      // Check if drawer format is requested
+      const isDrawerFormat = drawer === "true";
 
       // Build where clause
       const whereClause = {};
@@ -99,30 +112,65 @@ class UsersController {
         ];
       }
 
-      const { count, rows } = await users.findAndCountAll({
-        where: whereClause,
-        attributes: { exclude: ["password"] },
-        limit: parseInt(limit),
-        offset: parseInt(offset),
-        order: [["createdAt", "DESC"]],
-      });
+      // If getting all users, don't use pagination
+      if (getAllUsers) {
+        const users = await users.findAll({
+          where: whereClause,
+          attributes: isDrawerFormat
+            ? ["id", "first_name", "last_name", "role"] // Only essential fields for drawer format
+            : { exclude: ["password"] },
+          order: [["first_name", "ASC"]],
+        });
 
-      const totalPages = Math.ceil(count / limit);
+        // Transform users to drawer format if requested
+        let finalUsers = users;
+        if (isDrawerFormat) {
+          finalUsers = users.map((user) => ({
+            value: user.id,
+            label: `${user.first_name} ${user.last_name} (${user.role})`,
+          }));
+        }
 
-      return sendSuccessRespose(
-        res,
-        {
-          users: rows,
-          pagination: {
-            currentPage: parseInt(page),
-            totalPages,
-            totalUsers: count,
-            usersPerPage: parseInt(limit),
+        return sendSuccessRespose(
+          res,
+          {
+            users: finalUsers,
+            totalCount: users.length,
           },
-        },
-        "Users retrieved successfully",
-        200
-      );
+          isDrawerFormat
+            ? "Users fetched in drawer format successfully"
+            : "All users fetched successfully",
+          200
+        );
+      } else {
+        // Use pagination for regular requests
+        const offset = (page - 1) * limit;
+
+        const { count, rows } = await users.findAndCountAll({
+          where: whereClause,
+          attributes: { exclude: ["password"] },
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          order: [["createdAt", "DESC"]],
+        });
+
+        const totalPages = Math.ceil(count / limit);
+
+        return sendSuccessRespose(
+          res,
+          {
+            users: rows,
+            pagination: {
+              currentPage: parseInt(page),
+              totalPages,
+              totalUsers: count,
+              usersPerPage: parseInt(limit),
+            },
+          },
+          "Users retrieved successfully",
+          200
+        );
+      }
     } catch (error) {
       console.error("Get all users error:", error);
       return sendErrorResponse(res, "Failed to get users", 500);

@@ -17,4 +17,7 @@ router.get("/", invoicesCtrl.getAllInvoices);
  */
 router.get("/:id", invoicesCtrl.getInvoiceById);
 
+
+router.get('/all', invoicesCtrl.getAllIDInvoices)
+
 module.exports = router;

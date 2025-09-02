@@ -51,7 +51,7 @@ exports.createCategory = async (req, res) => {
 
 exports.getCategories = async (req, res) => {
   try {
-    const { include_products } = req.query;
+    const { include_products, drawer } = req.query;
 
     if (include_products === "true") {
       // Get categories with products
@@ -73,21 +73,64 @@ exports.getCategories = async (req, res) => {
         ],
       });
 
-      return sendSuccessRespose(
-        res,
-        categories,
-        "Categories with products fetched successfully",
-        200
-      );
+      // Transform to drawer format if requested
+      if (drawer === "true") {
+        const transformedCategories = categories.map((category) => ({
+          value: category.id,
+          ...(drawer === "true" && { label: category.name }),
+          products: category.products.map((product) => ({
+            value: product.id,
+            ...(drawer === "true" && { label: product.name }),
+            // full_name: product.full_name,
+            // description: product.description,
+            // price: product.price,
+            // is_active: product.is_active,
+          })),
+        }));
+
+        return sendSuccessRespose(
+          res,
+          transformedCategories,
+          "Categories with products in drawer format fetched successfully",
+          200
+        );
+      } else {
+        return sendSuccessRespose(
+          res,
+          categories,
+          "Categories with products fetched successfully",
+          200
+        );
+      }
     } else {
       // Get categories without products (default)
       const categories = await Categories.findAll();
-      return sendSuccessRespose(
-        res,
-        categories,
-        "Categories fetched successfully",
-        200
-      );
+
+      // Transform to drawer format if requested
+      if (drawer === "true") {
+        const transformedCategories = categories.map((category) => ({
+          value: category.id,
+          ...(drawer === "true" && { label: category.name }),
+          // name: category.name,
+          // description: category.description,
+          // created_at: category.created_at,
+          // updated_at: category.updated_at,
+        }));
+
+        return sendSuccessRespose(
+          res,
+          transformedCategories,
+          "Categories in drawer format fetched successfully",
+          200
+        );
+      } else {
+        return sendSuccessRespose(
+          res,
+          categories,
+          "Categories fetched successfully",
+          200
+        );
+      }
     }
   } catch (error) {
     console.error("Get categories error:", error);

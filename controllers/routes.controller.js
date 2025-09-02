@@ -1,5 +1,6 @@
 const { routes: Routes } = require("../models");
 const { sendSuccessRespose, sendErrorResponse } = require("../utils/response");
+const Sequelize = require("sequelize");
 
 exports.createRoute = async (req, res) => {
   try {
@@ -17,10 +18,130 @@ exports.createRoute = async (req, res) => {
 
 exports.getRoutes = async (req, res) => {
   try {
-    const routes = await Routes.findAll();
-    return sendSuccessRespose(res, routes, "Routes fetched successfully", 200);
+    const {
+      page = 1,
+      limit = 10,
+      all,
+      drawer,
+      search,
+      sortBy = "route_name",
+      sortOrder = "ASC",
+    } = req.query;
+
+    // Check if all routes are requested
+    const getAllRoutes = all === "true";
+
+    // Check if drawer format is requested
+    const isDrawerFormat = drawer === "true";
+
+    // Build where clause
+    const whereClause = {};
+    if (search) {
+      whereClause[Sequelize.Op.or] = [
+        { route_number: { [Sequelize.Op.like]: `%${search}%` } },
+        { route_name: { [Sequelize.Op.like]: `%${search}%` } },
+        { route_description: { [Sequelize.Op.like]: `%${search}%` } },
+      ];
+    }
+
+    // Build order clause
+    const orderClause = [[sortBy, sortOrder.toUpperCase()]];
+
+    // If getting all routes, don't use pagination
+    if (getAllRoutes) {
+      const routes = await Routes.findAll({
+        where: whereClause,
+        attributes: isDrawerFormat
+          ? ["id", "route_number", "route_name"] // Only essential fields for drawer format
+          : [
+              "id",
+              "route_number",
+              "route_name",
+              "route_description",
+              "createdAt",
+              "updatedAt",
+            ],
+        order: orderClause,
+      });
+
+      // Transform routes to drawer format if requested
+      let finalRoutes = routes;
+      if (isDrawerFormat) {
+        finalRoutes = routes.map((route) => ({
+          value: route.id,
+          label: `${route.route_number} - ${route.route_name}`,
+        }));
+      }
+
+      return sendSuccessRespose(
+        res,
+        {
+          routes: finalRoutes,
+          totalCount: routes.length,
+        },
+        isDrawerFormat
+          ? "Routes fetched in drawer format successfully"
+          : "All routes fetched successfully",
+        200
+      );
+    } else {
+      // Use pagination for regular requests
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+      const offset = (pageNum - 1) * limitNum;
+
+      const { count, rows } = await Routes.findAndCountAll({
+        where: whereClause,
+        attributes: [
+          "id",
+          "route_number",
+          "route_name",
+          "route_description",
+          "createdAt",
+          "updatedAt",
+        ],
+        order: orderClause,
+        limit: limitNum,
+        offset: offset,
+      });
+
+      // Transform routes to drawer format if requested
+      let finalRoutes = rows;
+      if (isDrawerFormat) {
+        finalRoutes = rows.map((route) => ({
+          value: route.id,
+          label: `${route.route_number} - ${route.route_name}`,
+        }));
+      }
+
+      const totalPages = Math.ceil(count / limitNum);
+      const hasNextPage = pageNum < totalPages;
+      const hasPrevPage = pageNum > 1;
+
+      return sendSuccessRespose(
+        res,
+        {
+          routes: finalRoutes,
+          pagination: {
+            currentPage: pageNum,
+            totalPages,
+            totalRoutes: count,
+            routesPerPage: limitNum,
+            hasNextPage,
+            hasPrevPage,
+            nextPage: hasNextPage ? pageNum + 1 : null,
+            prevPage: hasPrevPage ? pageNum - 1 : null,
+          },
+        },
+        isDrawerFormat
+          ? "Routes fetched in drawer format successfully"
+          : "Routes fetched successfully",
+        200
+      );
+    }
   } catch (error) {
-    return sendErrorResponse(res, error.message);
+    console.error("Get routes error:", error);
+    return sendErrorResponse(res, "Failed to get routes", 500);
   }
 };
 

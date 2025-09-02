@@ -112,9 +112,9 @@ class QBXMLHandler {
         );
       }
 
-      // Add Customer query
+      // Add Customer query (uncommented for manual sync)
       // this.addCustomerQuery();
-      // Add Invoice query with line items to get detailed transaction data
+      // Add Invoice query with line items to get detailed transaction data (uncommented for manual sync)
       // this.addInvoiceQuery();
       // Add Estimate query with line items if you need estimates
       // this.addEstimateQuery();
