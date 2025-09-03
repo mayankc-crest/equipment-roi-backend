@@ -167,13 +167,16 @@ exports.getCategoryById = async (req, res) => {
       ],
     });
 
-    let products = categoryProducts.map((cp) => cp.product);
+    let products = categoryProducts.map((cp) => ({
+      ...cp.product.toJSON(),
+      category: category.name, // Add category name to each product
+    }));
 
     // Transform products to drawer format if requested
     if (drawer === "true") {
       products = products.map((product) => ({
         value: product.id,
-        label: product.name,
+        ...(drawer === "true" && { label: product.name }),
       }));
     }
 

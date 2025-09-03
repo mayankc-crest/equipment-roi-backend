@@ -24,11 +24,35 @@ module.exports = (sequelize, DataTypes) => {
           key: "id",
         },
       },
-      quatity: {
+      product_condition: {
+        type: DataTypes.ENUM("New", "Used"),
+        allowNull: false,
+        defaultValue: "New",
+        comment: "Condition of the product",
+      },
+      sale_type: {
+        type: DataTypes.ENUM("sold", "lease"),
+        allowNull: false,
+        defaultValue: "lease",
+        comment: "Type of sale",
+      },
+      quantity: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
         defaultValue: 1.0,
         comment: "Quantity of the item",
+      },
+      price: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+        defaultValue: 0.0,
+        comment: "Price of the item",
+      },
+      total_price: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+        defaultValue: 0.0,
+        comment: "Total price of the item",
       },
       created_at: {
         type: DataTypes.DATE,
@@ -45,6 +69,7 @@ module.exports = (sequelize, DataTypes) => {
     },
     {
       tableName: "calc_invoice_line_items",
+      freezeTableName: true,
       timestamps: true,
       createdAt: "created_at",
       updatedAt: "updated_at",
