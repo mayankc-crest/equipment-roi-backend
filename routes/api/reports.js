@@ -23,4 +23,17 @@ router.get(
   reportsCtrl.getROIByProductEquipmentReports
 );
 
+/**
+ * @description Get top products with drop-offs reports
+ * @path /api/reports/top-products-with-dropoffs
+ * @method GET
+ * @query {string} search - Search term for product name (optional)
+ * @query {number} page - Page number for pagination (optional, default: 1)
+ * @query {number} limit - Number of records per page (optional, default: 10)
+ */
+router.get(
+  "/top-products-with-dropoffs",
+  reportsCtrl.getTopProductsWithDropoffsReports
+);
+
 module.exports = router;
