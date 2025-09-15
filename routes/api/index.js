@@ -7,6 +7,10 @@ const invoiceRoutes = require("./invoices");
 const syncRoutes = require("./sync");
 const authRoutes = require("./auth");
 const userRoutes = require("./users");
+const settingsRoutes = require("./settings");
+const alertsRoutes = require("./alerts");
+const dashboardRoutes = require("./dashboard");
+const reportsRoutes = require("./reports");
 
 const router = express.Router();
 
@@ -37,5 +41,16 @@ router.use("/invoices", invoiceRoutes);
 
 //sync
 router.use("/sync", syncRoutes);
+
+//settings
+router.use("/settings", settingsRoutes);
+
+//alerts
+router.use("/alerts", alertsRoutes);
+
+//dashboard
+router.use("/dashboard", dashboardRoutes);
+
+router.use("/reports", reportsRoutes);
 
 module.exports = router;

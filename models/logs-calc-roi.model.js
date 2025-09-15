@@ -1,8 +1,8 @@
 "use strict";
 
 module.exports = (sequelize, DataTypes) => {
-  const CalcRoi = sequelize.define(
-    "calc_roi",
+  const LogsCalcRoi = sequelize.define(
+    "logs_calc_roi",
     {
       id: {
         type: DataTypes.BIGINT(20),
@@ -10,11 +10,11 @@ module.exports = (sequelize, DataTypes) => {
         primaryKey: true,
         autoIncrement: true,
       },
-      customer_id: {
+      calc_roi_id: {
         type: DataTypes.BIGINT(20),
         allowNull: false,
         references: {
-          model: "customers",
+          model: "calc_roi",
           key: "id",
         },
         onUpdate: "CASCADE",
@@ -82,35 +82,20 @@ module.exports = (sequelize, DataTypes) => {
       },
     },
     {
-      tableName: "calc_roi",
+      tableName: "logs_calc_roi",
       timestamps: true,
       freezeTableName: true,
       createdAt: "created_at",
       updatedAt: "updated_at",
-      indexes: [
-        {
-          fields: ["customer_id"],
-        },
-      ],
     }
   );
 
-  CalcRoi.associate = (models) => {
-    CalcRoi.belongsTo(models.customers, {
-      foreignKey: "customer_id",
-      as: "customer",
-    });
-
-    CalcRoi.hasMany(models.calc_invoices, {
-      foreignKey: "roi_id",
-      as: "calcInvoices",
-    });
-
-    CalcRoi.hasMany(models.calc_roi_categories, {
-      foreignKey: "roi_id",
-      as: "calcRoiCategories",
+  LogsCalcRoi.associate = (models) => {
+    LogsCalcRoi.belongsTo(models.calc_roi, {
+      foreignKey: "calc_roi_id",
+      as: "calcRoi",
     });
   };
 
-  return CalcRoi;
+  return LogsCalcRoi;
 };

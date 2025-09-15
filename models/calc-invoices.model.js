@@ -81,6 +81,11 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: 0.0,
         comment: "Total amount of the invoice",
       },
+      installation_date: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        comment: "Installation date for the invoice",
+      },
     },
     {
       timestamps: true,
@@ -111,8 +116,6 @@ module.exports = (sequelize, DataTypes) => {
 
   // Define associations
   CalcInvoices.associate = (models) => {
-    // Temporarily comment out associations to debug
-    /*
     CalcInvoices.belongsTo(models.calc_roi, {
       foreignKey: "roi_id",
       as: "roi",
@@ -142,7 +145,6 @@ module.exports = (sequelize, DataTypes) => {
       foreignKey: "calc_invoice_id",
       as: "lineItems",
     });
-    */
   };
 
   return CalcInvoices;

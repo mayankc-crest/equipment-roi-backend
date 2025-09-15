@@ -105,6 +105,12 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true, // Changed to true - can be null
         comment: "Whether the invoice is active in QuickBooks",
       },
+      is_calculated: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        comment: "Flag to indicate invoice is included in ROI calculation",
+      },
     },
     {
       timestamps: true, // Changed to true to enable Sequelize timestamps

@@ -95,7 +95,7 @@ class UsersController {
       } = req.query;
 
       // Check if all users are requested
-      const getAllUsers = all === "true";
+      const shouldGetAll = all === "true";
 
       // Check if drawer format is requested
       const isDrawerFormat = drawer === "true";
@@ -113,8 +113,8 @@ class UsersController {
       }
 
       // If getting all users, don't use pagination
-      if (getAllUsers) {
-        const users = await users.findAll({
+      if (shouldGetAll) {
+        const fetchedUsers = await users.findAll({
           where: whereClause,
           attributes: isDrawerFormat
             ? ["id", "first_name", "last_name", "role"] // Only essential fields for drawer format
@@ -123,11 +123,11 @@ class UsersController {
         });
 
         // Transform users to drawer format if requested
-        let finalUsers = users;
+        let finalUsers = fetchedUsers;
         if (isDrawerFormat) {
-          finalUsers = users.map((user) => ({
+          finalUsers = fetchedUsers.map((user) => ({
             value: user.id,
-            label: `${user.first_name} ${user.last_name} (${user.role})`,
+            label: `${user.first_name} ${user.last_name}`,
           }));
         }
 
@@ -135,7 +135,7 @@ class UsersController {
           res,
           {
             users: finalUsers,
-            totalCount: users.length,
+            totalCount: fetchedUsers.length,
           },
           isDrawerFormat
             ? "Users fetched in drawer format successfully"

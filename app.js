@@ -1,6 +1,7 @@
 require("dotenv").config();
 const QuickBooksServer = require("./quickbook/server");
 const qbXMLHandler = require("./quickbook/qbXMLHandler");
+const { startThreeYearReviewCron } = require("./jobs/threeYearReviewCron");
 
 const express = require("express");
 const cors = require("cors");
@@ -573,6 +574,10 @@ const server = app.listen(port, () => {
 
     // No more setInterval - QuickBooks sync happens only when QBWC connects
     global.syncInterval = null; // No automatic sync
+
+    // Start the 3-year review cron job
+    console.log("🕐 Starting 3-year review cron job...");
+    startThreeYearReviewCron();
   } catch (error) {
     console.log("❌ Error connecting to server:", error);
   }

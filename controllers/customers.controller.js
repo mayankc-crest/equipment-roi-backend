@@ -10,9 +10,10 @@ exports.getAllCustomers = async (req, res) => {
       customer_type,
       job_status,
       search,
+      all,
     } = req.query;
-    const offset = (page - 1) * limit;
 
+    const getAllCustomers = all === "true";
     // Build where clause
     const whereClause = {};
     if (customer_type) whereClause.customer_type = customer_type;
@@ -26,44 +27,72 @@ exports.getAllCustomers = async (req, res) => {
       ];
     }
 
-    const { count, rows } = await Customers.findAndCountAll({
-      where: whereClause,
-      attributes: [
-        "id",
-        "first_name",
-        "last_name",
-        "company_name",
-        "email",
-        "phone",
-        "customer_type",
-        "job_status",
-        "balance",
-        "total_balance",
-        "quickbook_list_id",
-        "createdAt",
-        "updatedAt",
-      ],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
-      order: [["createdAt", "DESC"]],
-    });
+    if (getAllCustomers) {
+      const customers = await Customers.findAll({
+        where: whereClause,
+        attributes: [
+          "id",
+          "first_name",
+          "last_name",
+          "company_name",
+          "email",
+          "phone",
+          "customer_type",
+          "job_status",
+          "balance",
+          "total_balance",
+          "quickbook_list_id",
+          "createdAt",
+          "updatedAt",
+        ],
+      });
+      return sendSuccessRespose(
+        res,
+        customers,
+        "Customers fetched successfully",
+        200
+      );
+    } else {
+      const offset = (page - 1) * limit;
+      const { count, rows } = await Customers.findAndCountAll({
+        where: whereClause,
+        attributes: [
+          "id",
+          "first_name",
+          "last_name",
+          "company_name",
+          "email",
+          "phone",
+          "customer_type",
+          "job_status",
+          "balance",
+          "total_balance",
+          "quickbook_list_id",
+          "createdAt",
+          "updatedAt",
+        ],
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        order: [["createdAt", "DESC"]],
+      });
 
-    const totalPages = Math.ceil(count / limit);
+      const totalPages = Math.ceil(count / limit);
 
-    return sendSuccessRespose(
-      res,
-      {
-        customers: rows,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages,
-          totalCustomers: count,
-          customersPerPage: parseInt(limit),
+      return sendSuccessRespose(
+        res,
+        {
+          customers: rows,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages,
+            totalCustomers: count,
+            customersPerPage: parseInt(limit),
+          },
         },
-      },
-      "Customers fetched successfully",
-      200
-    );
+        "Customers fetched successfully",
+        200
+      );
+    }
   } catch (error) {
     console.error("Get all customers error:", error);
     return sendErrorResponse(res, "Failed to get customers", 500);
