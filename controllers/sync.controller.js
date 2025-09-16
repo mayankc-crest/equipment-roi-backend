@@ -71,7 +71,7 @@ class SyncController {
           "Customer sync request generated successfully. QuickBooks Web Connector needs to be running to process the request.",
         data: {
           requestGenerated: true,
-          requestCount: requests.length,
+          // requestCount: requests.length,
           note: "The actual sync will happen when QuickBooks Web Connector processes the request and returns data",
         },
         timestamp: new Date().toISOString(),
