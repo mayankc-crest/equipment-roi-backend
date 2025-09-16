@@ -665,6 +665,7 @@ exports.getCustomersTotalSalesAnalytics = async (req, res) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     // Get customer sales data with pagination using raw query approach
+    console.log('this is the query here::')
     const customerSalesData = await LogsCalcRoi.findAll({
       attributes: [
         "calc_roi_id",

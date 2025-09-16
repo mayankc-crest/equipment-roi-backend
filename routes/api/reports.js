@@ -36,4 +36,62 @@ router.get(
   reportsCtrl.getTopProductsWithDropoffsReports
 );
 
+/**
+ * @description Get customer drop-off by product reports
+ * @path /api/reports/customer-dropoff-by-product
+ * @method GET
+ * @query {string} product_name - Filter by product name (optional)
+ * @query {string} customer_name - Filter by customer name (optional)
+ * @query {number} page - Page number for pagination (optional, default: 1)
+ * @query {number} limit - Number of records per page (optional, default: 10)
+ * @query {string} sort_by - Sort by field (optional, default: "days_since_last_purchase")
+ * @query {string} sort_order - Sort order (optional, default: "DESC")
+ */
+router.get(
+  "/customer-dropoff-by-product",
+  reportsCtrl.getCustomerDropoffByProductReports
+);
+
+/**
+ * @description Get product lifecycle reports
+ * @path /api/reports/product-lifecycle
+ * @method GET
+ * @query {number} customer_id - Filter by customer ID (optional)
+ * @query {number} page - Page number for pagination (optional, default: 1)
+ * @query {number} limit - Number of records per page (optional, default: 10)
+ * @query {string} sort_by - Sort by field (optional, default: "total_customers")
+ * @query {string} sort_order - Sort order (optional, default: "DESC")
+ */
+router.get("/product-lifecycle", reportsCtrl.getProductLifecycleReports);
+
+/**
+ * @description Get underperforming customers reports
+ * @path /api/reports/underperforming-customers
+ * @method GET
+ * @query {number} year - Filter by year (optional, default: current year)
+ * @query {number} page - Page number for pagination (optional, default: 1)
+ * @query {number} limit - Number of records per page (optional, default: 10)
+ * @query {string} sort_by - Sort by field (optional, default: "sales_gap")
+ * @query {string} sort_order - Sort order (optional, default: "DESC")
+ */
+router.get(
+  "/underperforming-customers",
+  reportsCtrl.getUnderperformingCustomersReports
+);
+
+/**
+ * @description Get outstanding performance customers reports
+ * @path /api/reports/outstanding-performance-customers
+ * @method GET
+ * @query {number} year - Filter by year (optional, default: current year)
+ * @query {number} page - Page number for pagination (optional, default: 1)
+ * @query {number} limit - Number of records per page (optional, default: 10)
+ * @query {string} sort_by - Sort by field (optional, default: "performance_percentage")
+ * @query {string} sort_order - Sort order (optional, default: "DESC")
+ */
+router.get(
+  "/outstanding-performance-customers",
+  reportsCtrl.getOutstandingPerformanceCustomersReports
+);
+
 module.exports = router;
