@@ -61,7 +61,7 @@ exports.getAllInvoices = async (req, res) => {
         order: [["created_at", "DESC"]],
         distinct: true, // Important for correct count when using includes
       });
-      console.log("the found invoices are::", rows);
+      // console.log("the found invoices are::", rows);
       // Transform data for calc_invoice response
       const calcInvoicesWithType = rows.map((calcRoi) => {
         const totalSales = calcRoi.total_sales;
@@ -788,20 +788,51 @@ exports.invoiceCategory = async (req, res) => {
       return sendErrorResponse(res, "ROI calculation not found", 404);
     }
 
-    // Clear existing categories for this ROI
-    await CalcRoiCategories.destroy({
+    // Get existing categories for this ROI
+    const existingCategories = await CalcRoiCategories.findAll({
       where: { roi_id: roiId },
+      attributes: ["category_id"],
     });
-    console.log(`Cleared existing categories for ROI ID: ${roiId}`);
 
-    // Create new category entries
+    const existingCategoryIds = existingCategories.map(
+      (cat) => cat.category_id
+    );
+    console.log(
+      `Existing categories for ROI ID ${roiId}:`,
+      existingCategoryIds
+    );
+
+    // Find categories that need to be added (not already existing)
+    const categoriesToAdd = category_id.filter(
+      (categoryId) => !existingCategoryIds.includes(categoryId)
+    );
+    console.log(`Categories to add:`, categoriesToAdd);
+
+    // Create only new category entries
     const createdCategories = [];
 
-    for (const categoryId of category_id) {
-      // Check if category exists
+    for (const categoryId of categoriesToAdd) {
+      // Check if category exists in categories table
       const category = await Categories.findByPk(categoryId);
       if (!category) {
-        console.log(`Category with ID ${categoryId} not found, skipping`);
+        console.log(
+          `Category with ID ${categoryId} not found in categories table, skipping`
+        );
+        continue;
+      }
+
+      // Check if this combination already exists (double-check)
+      const existingEntry = await CalcRoiCategories.findOne({
+        where: {
+          roi_id: roiId,
+          category_id: categoryId,
+        },
+      });
+
+      if (existingEntry) {
+        console.log(
+          `Category ${categoryId} already exists for ROI ${roiId}, skipping`
+        );
         continue;
       }
 
@@ -810,10 +841,9 @@ exports.invoiceCategory = async (req, res) => {
         roi_id: roiId,
         category_id: categoryId,
       });
-
       createdCategories.push(calcRoiCategory);
       console.log(
-        `Created calc_roi_category entry for ROI ID: ${roiId}, Category ID: ${categoryId}`
+        `Created new category association: ROI ${roiId} -> Category ${categoryId}`
       );
     }
 
@@ -822,10 +852,16 @@ exports.invoiceCategory = async (req, res) => {
       {
         roi_id: roiId,
         categories_added: createdCategories.length,
+        categories_skipped: category_id.length - createdCategories.length,
+        total_requested: category_id.length,
         category_ids: category_id,
-        message: `Successfully added ${createdCategories.length} categories to ROI calculation`,
+        message: `Successfully processed categories. Added: ${
+          createdCategories.length
+        }, Skipped (already exist): ${
+          category_id.length - createdCategories.length
+        }`,
       },
-      "Categories added to ROI calculation successfully",
+      "Categories processed successfully",
       200
     );
   } catch (error) {
@@ -1003,6 +1039,17 @@ exports.getCalcInvoiceDetails = async (req, res) => {
           attributes: ["id", "first_name", "last_name", "company_name"],
         },
         {
+          model: CalcRoiCategories,
+          as: "calcRoiCategories",
+          include: [
+            {
+              model: Categories,
+              as: "category",
+              attributes: ["id", "name", "description"],
+            },
+          ],
+        },
+        {
           model: CalcInvoices,
           as: "calcInvoices",
           include: [
@@ -1097,6 +1144,11 @@ exports.getCalcInvoiceDetails = async (req, res) => {
       };
     });
 
+    // Extract category IDs from calcRoiCategories
+    const categoryIds = calcRoi.calcRoiCategories
+      ? calcRoi.calcRoiCategories.map((roiCategory) => roiCategory.category_id)
+      : [];
+
     // Build response matching getAllIDInvoices structure
     const response = {
       calc_roi_id: calcRoi.id,
@@ -1106,6 +1158,7 @@ exports.getCalcInvoiceDetails = async (req, res) => {
           `${customer.first_name} ${customer.last_name}`
         : "",
       start_date: calcRoi.start_date,
+      category_ids: categoryIds,
       invoices: transformedInvoices,
       invoices_count: invoices.length,
       created_at: calcRoi.created_at,
