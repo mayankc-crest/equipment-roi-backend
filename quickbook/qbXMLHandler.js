@@ -1,19 +1,6 @@
-/*
- * qbXML Handler for QuickBooks Web Connector
- *
- * This handler manages qbXML requests and responses for QuickBooks integration.
- * It implements the required interface for the QuickBooks Web Connector.
- */
-
 const fs = require("fs");
 const path = require("path");
 const { XMLParser } = require("fast-xml-parser");
-
-/**
- * qbXML Handler Class
- *
- * Handles qbXML requests and responses for QuickBooks Web Connector
- */
 class QBXMLHandler {
   constructor() {
     this.requestQueue = [];
@@ -187,7 +174,6 @@ class QBXMLHandler {
 <QBXML>
     <QBXMLMsgsRq onError="stopOnError">
         <CustomerQueryRq requestID="1">
-            <MaxReturned>1000</MaxReturned>
             <ActiveStatus>All</ActiveStatus>
         </CustomerQueryRq>
     </QBXMLMsgsRq>
@@ -206,8 +192,8 @@ class QBXMLHandler {
     <QBXMLMsgsRq onError="stopOnError">
         <InvoiceQueryRq requestID="2">
             <TxnDateRangeFilter>
-                <FromTxnDate>2024-01-01</FromTxnDate>
-                <ToTxnDate>2024-12-31</ToTxnDate>
+                <FromTxnDate>2025-09-18</FromTxnDate>
+                <ToTxnDate>2025-09-18</ToTxnDate>
             </TxnDateRangeFilter>
             <IncludeLineItems>true</IncludeLineItems>
         </InvoiceQueryRq>
@@ -239,97 +225,6 @@ class QBXMLHandler {
 
     this.requestQueue.push(itemQuery);
   }
-
-  /**
-   * Add a vendor query request to the queue
-   */
-  //   addVendorQuery() {
-  //     const vendorQuery = `<?xml version="1.0" encoding="utf-8"?>
-  // <?qbxml version="13.0"?>
-  // <QBXML>
-  //     <QBXMLMsgsRq onError="stopOnError">
-  //         <VendorQueryRq requestID="4">
-  //             <MaxReturned>50</MaxReturned>
-  //             <ActiveStatus>All</ActiveStatus>
-  //         </VendorQueryRq>
-  //     </QBXMLMsgsRq>
-  // </QBXML>`;
-
-  //     this.requestQueue.push(vendorQuery);
-  //   }
-
-  //   /**
-  //    * Add a customer add request to the queue
-  //    *
-  //    * @param {Object} customerData - Customer data object
-  //    */
-  //   addCustomerAdd(customerData) {
-  //     const customerAdd = `<?xml version="1.0" encoding="utf-8"?>
-  // <?qbxml version="13.0"?>
-  // <QBXML>
-  //     <QBXMLMsgsRq onError="stopOnError">
-  //         <CustomerAddRq requestID="5">
-  //             <CustomerAdd>
-  //                 <Name>${customerData.name || "New Customer"}</Name>
-  //                 <CompanyName>${customerData.companyName || ""}</CompanyName>
-  //                 <FirstName>${customerData.firstName || ""}</FirstName>
-  //                 <LastName>${customerData.lastName || ""}</LastName>
-  //                 <BillAddress>
-  //                     <Addr1>${customerData.address1 || ""}</Addr1>
-  //                     <Addr2>${customerData.address2 || ""}</Addr2>
-  //                     <City>${customerData.city || ""}</City>
-  //                     <State>${customerData.state || ""}</State>
-  //                     <PostalCode>${customerData.postalCode || ""}</PostalCode>
-  //                     <Country>${customerData.country || ""}</Country>
-  //                 </BillAddress>
-  //                 <Phone>${customerData.phone || ""}</Phone>
-  //                 <Email>${customerData.email || ""}</Email>
-  //             </CustomerAdd>
-  //         </CustomerAddRq>
-  //     </QBXMLMsgsRq>
-  // </QBXML>`;
-
-  //     this.requestQueue.push(customerAdd);
-  //   }
-
-  //   /**
-  //    * Add an invoice add request to the queue
-  //    *
-  //    * @param {Object} invoiceData - Invoice data object
-  //    */
-  //   addInvoiceAdd(invoiceData) {
-  //     const invoiceAdd = `<?xml version="1.0" encoding="utf-8"?>
-  // <?qbxml version="13.0"?>
-  // <QBXML>
-  //     <QBXMLMsgsRq onError="stopOnError">
-  //         <InvoiceAddRq requestID="6">
-  //             <InvoiceAdd>
-  //                 <CustomerRef>
-  //                     <ListID>${invoiceData.customerListID || ""}</ListID>
-  //                     <FullName>${invoiceData.customerName || ""}</FullName>
-  //                 </CustomerRef>
-  //                 <TxnDate>${
-  //                   invoiceData.txnDate || new Date().toISOString().split("T")[0]
-  //                 }</TxnDate>
-  //                 <RefNumber>${invoiceData.refNumber || ""}</RefNumber>
-  //                 <InvoiceLineAdd>
-  //                     <ItemRef>
-  //                         <ListID>${invoiceData.itemListID || ""}</ListID>
-  //                         <FullName>${
-  //                           invoiceData.itemName || "Service"
-  //                         }</FullName>
-  //                     </ItemRef>
-  //                     <Desc>${invoiceData.description || ""}</Desc>
-  //                     <Quantity>${invoiceData.quantity || 1}</Quantity>
-  //                     <Rate>${invoiceData.rate || 0}</Rate>
-  //                 </InvoiceLineAdd>
-  //             </InvoiceAdd>
-  //         </InvoiceAddRq>
-  //     </QBXMLMsgsRq>
-  // </QBXML>`;
-
-  //     this.requestQueue.push(invoiceAdd);
-  //   }
 
   /**
    * Process the qbXML response
@@ -745,7 +640,7 @@ class QBXMLHandler {
             itemListID: "",
             itemName: "",
             description: line.Desc || "",
-            quantity: parseFloat(line.Qty) || 1.0,
+            quantity: parseFloat(line.Quantity) || 1.0,
             unitPrice: parseFloat(line.Rate) || 0.0,
             amount: parseFloat(line.Amount) || 0.0,
           };
@@ -920,7 +815,17 @@ class QBXMLHandler {
           console.log(
             `🔄 Processing invoice: ${invoice.refNumber || "Unknown"}`
           );
-
+          let CalROICustomer = false;
+          let calROIID = null;
+          let net_cost = 0;
+          let net_products_total = 0;
+          let total_sales = 0;
+          let total_recouped = 0;
+          let net_cost_left = 0;
+          let routeId = null;
+          let salesRepId = null;
+          let calcInvoiceId = null;
+          let productIds = [];
           // Validate invoice data
           if (
             !invoice.refNumber ||
@@ -946,6 +851,7 @@ class QBXMLHandler {
           // Find the customer by QuickBooks ListID
           let customerId = null;
           if (invoice.customerListID) {
+            // this if condition is for customer and get it's data for same
             const customer = await db.customers.findOne({
               where: { quickbook_list_id: invoice.customerListID },
             });
@@ -954,6 +860,55 @@ class QBXMLHandler {
               console.log(
                 `  🔗 Found customer: ${customer.name} (ID: ${customerId})`
               );
+
+              // Check if customer exists in calc_roi table
+              const calcRoiExists = await db.calc_roi.findOne({
+                where: { customer_id: customerId },
+              });
+
+              if (calcRoiExists) {
+                CalROICustomer = true;
+                calROIID = calcRoiExists.id;
+                net_cost = calcRoiExists.net_cost;
+                net_products_total = calcRoiExists.net_products_total;
+                total_sales = calcRoiExists.total_sales;
+                total_recouped = calcRoiExists.total_recouped;
+                net_cost_left = calcRoiExists.net_cost_left;
+
+                const calcInvoice = await db.calc_invoices.findOne({
+                  where: { roi_id: calcRoiExists.id },
+                  attributes: ["route_id", "sales_rep_id"],
+                });
+
+                if (calcInvoice) {
+                  routeId = calcInvoice.route_id;
+                  salesRepId = calcInvoice.sales_rep_id;
+                }
+
+                // Get category IDs from calc_roi_categories
+                const calcRoiCategories = await db.calc_roi_categories.findAll({
+                  where: { roi_id: calcRoiExists.id },
+                  attributes: ["category_id"],
+                });
+
+                const categoryIds = calcRoiCategories.map(
+                  (cat) => cat.category_id
+                );
+                // Get product IDs from category_products table
+                if (categoryIds.length > 0) {
+                  const categoryProducts = await db.category_products.findAll({
+                    where: {
+                      category_id: { [db.Sequelize.Op.in]: categoryIds },
+                    },
+                    attributes: ["product_id"],
+                  });
+
+                  const foundProductIds = categoryProducts.map(
+                    (cp) => cp.product_id
+                  );
+                  productIds = foundProductIds;
+                }
+              }
             } else {
               console.log(
                 `  ⚠️ Customer not found for ListID: ${invoice.customerListID}`
@@ -968,6 +923,36 @@ class QBXMLHandler {
 
           if (existingInvoice) {
             // Update existing invoice
+            // console.log("THE existing invoice is here :::", existingInvoice);
+            if (CalROICustomer) {
+              if (!existingInvoice.is_calculated) {
+                try {
+                  const calcInvoice = await db.calc_invoices.create({
+                    roi_id: calROIID,
+                    invoice_id: existingInvoice.id,
+                    customer_id: customerId,
+                    route_id: routeId,
+                    sales_rep_id: salesRepId,
+                    total_amount: existingInvoice.total_amount,
+                    installation_date: existingInvoice.txn_date, // You can set this if needed
+                  });
+                  calcInvoiceId = calcInvoice.id;
+                  // we need to add the update for is_calculated
+                  await existingInvoice.update({
+                    is_calculated: true,
+                  });
+                  console.log(
+                    "invoice got created in the calc_invoice table::: ",
+                    calcInvoice
+                  );
+                } catch (calcInvoiceError) {
+                  console.error(
+                    `Error creating calc_invoices entry for invoice ${existingInvoice.ref_number}:`,
+                    calcInvoiceError
+                  );
+                }
+              }
+            }
             await existingInvoice.update({
               txn_id: invoice.txn_id,
               txn_number: invoice.txn_number,
@@ -993,7 +978,15 @@ class QBXMLHandler {
             if (invoice.invoiceLines.length > 0) {
               await this.storeInvoiceLineItems(
                 invoice.invoiceLines,
-                existingInvoice.id
+                existingInvoice.id,
+                calROIID,
+                calcInvoiceId,
+                productIds,
+                net_cost,
+                net_products_total,
+                total_sales,
+                total_recouped,
+                net_cost_left
               );
             }
           } else {
@@ -1020,11 +1013,42 @@ class QBXMLHandler {
             console.log(`✅ Created new invoice: ${invoice.refNumber}`);
             createdCount++;
 
+            if (CalROICustomer) {
+              try {
+                const newCalcInvoice = await db.calc_invoices.create({
+                  roi_id: calROIID,
+                  invoice_id: newInvoice.id,
+                  customer_id: customerId,
+                  route_id: routeId,
+                  sales_rep_id: salesRepId,
+                  total_amount: invoice.totalAmount,
+                  installation_date: invoice.txnDate,
+                });
+                calcInvoiceId = newCalcInvoice.id;
+                await newInvoice.update({
+                  is_calculated: true,
+                });
+              } catch (error) {
+                console.error(
+                  "Error while creating new invoice calc_invoice::",
+                  error
+                );
+              }
+            }
+
             // Handle invoice line items for newly created invoice
             if (invoice.invoiceLines.length > 0) {
               await this.storeInvoiceLineItems(
                 invoice.invoiceLines,
-                newInvoice.id
+                newInvoice.id,
+                calROIID,
+                calcInvoiceId,
+                productIds,
+                net_cost,
+                net_products_total,
+                total_sales,
+                total_recouped,
+                net_cost_left
               );
             }
           }
@@ -1678,7 +1702,20 @@ class QBXMLHandler {
    * @param {Array} lineItems - Array of line item objects
    * @param {number} invoiceId - ID of the invoice
    */
-  async storeInvoiceLineItems(lineItems, invoiceId) {
+  async storeInvoiceLineItems(
+    lineItems,
+    invoiceId,
+    calROIID = null,
+    calcInvoiceId = null,
+    productIds = [],
+    old_net_cost = 0,
+    old_net_products_total = 0,
+    old_total_sales = 0,
+    old_total_recouped = 0,
+    old_net_cost_left = 0
+  ) {
+    console.log("the calc is ::", calcInvoiceId);
+    console.log("passed product ids are:::", productIds);
     try {
       console.log(
         `📋 Storing ${lineItems.length} line items for invoice ID: ${invoiceId}`
@@ -1687,6 +1724,8 @@ class QBXMLHandler {
       // Import the InvoiceLineItem model
       const db = require("../models");
       const InvoiceLineItems = db.invoice_line_items;
+
+      let amount = 0; // Move amount outside the loop to accumulate across all line items
 
       // Store each line item
       for (const lineItem of lineItems) {
@@ -1726,12 +1765,44 @@ class QBXMLHandler {
             console.log(
               `  ✅ Updated line item ${lineItem.lineNumber}: ${lineItem.itemName}`
             );
+            if (calcInvoiceId) {
+              if (productIds.includes(product.id)) {
+                amount = amount + lineItem.amount;
+
+                // Create entry in calc_invoice_line_items
+                await db.calc_invoice_line_items.create({
+                  calc_invoice_id: calcInvoiceId,
+                  line_item_id: existingLineItem.id,
+                  quantity: lineItem.quantity,
+                  price: lineItem.unitPrice,
+                  total_price: lineItem.amount,
+                  product_condition: "new",
+                  sale_type: "sold",
+                });
+              }
+            }
           } else {
             // Create new line item
-            await InvoiceLineItems.create(lineItemData);
+            const newLineItem = await InvoiceLineItems.create(lineItemData);
             console.log(
               `  ✅ Created line item ${lineItem.lineNumber}: ${lineItem.itemName}`
             );
+            if (calcInvoiceId) {
+              if (productIds.includes(product.id)) {
+                amount = amount + lineItem.amount;
+
+                // Create entry in calc_invoice_line_items
+                await db.calc_invoice_line_items.create({
+                  calc_invoice_id: calcInvoiceId,
+                  line_item_id: newLineItem.id,
+                  quantity: lineItem.quantity,
+                  price: lineItem.unitPrice,
+                  total_price: lineItem.amount,
+                  product_condition: "new",
+                  sale_type: "sold",
+                });
+              }
+            }
           }
         } catch (lineItemError) {
           console.error(
@@ -1739,6 +1810,30 @@ class QBXMLHandler {
             lineItemError
           );
         }
+      }
+
+      if (calcInvoiceId) {
+        // current recouped amount is
+        const current_recouped = amount / 4;
+
+        // calculation to store in the DB
+        const net_products_total = +old_net_products_total + amount;
+        const total_sales = +old_total_sales + amount;
+        const total_recouped = +old_total_recouped + current_recouped;
+        const net_cost_left = +old_net_cost - total_recouped;
+
+        // Update calc_roi table
+        await db.calc_roi.update(
+          {
+            net_products_total: net_products_total,
+            total_sales: total_sales,
+            total_recouped: total_recouped,
+            net_cost_left: net_cost_left,
+          },
+          {
+            where: { id: calROIID },
+          }
+        );
       }
 
       console.log(
