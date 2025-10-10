@@ -1,0 +1,15 @@
+{
+  "watch": [
+    "app.js",
+    "controllers/",
+    "models/",
+    "routes/",
+    "middleware/",
+    "utils/",
+    "jobs/",
+    "quickbook/"
+  ],
+  "ignore": ["logs/", "node_modules/", "*.log"],
+  "ext": "js,json",
+  "delay": 1000
+}

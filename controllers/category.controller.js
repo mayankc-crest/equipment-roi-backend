@@ -4,13 +4,83 @@ const {
   category_products: CategoryProduct,
   products: Products,
 } = require("../models");
+const {
+  buildParentIdTree,
+  getCategoryDepth,
+  validateHierarchy,
+} = require("../utils/categoryTreeUtils");
 
 exports.createCategory = async (req, res) => {
   try {
-    const { name, description, product_ids } = req.body;
+    const {
+      name,
+      description,
+      product_ids,
+      parent_id,
+      status = "active",
+    } = req.body;
+
+    // Validate required fields
+    if (!name || !description) {
+      return sendErrorResponse(res, "Name and description are required", 400);
+    }
+
+    // If parent_id is provided, validate it exists and check hierarchy rules
+    if (parent_id) {
+      // Check if parent category exists
+      const parentCategory = await Categories.findByPk(parent_id);
+      if (!parentCategory) {
+        return sendErrorResponse(res, "Parent category not found", 400);
+      }
+
+      // Check if parent is active
+      if (parentCategory.status !== "active") {
+        return sendErrorResponse(
+          res,
+          "Cannot create sub-category under inactive parent",
+          400
+        );
+      }
+
+      // Check maximum depth (prevent too deep nesting)
+      const parentDepth = await getCategoryDepth(
+        parent_id,
+        Categories.sequelize
+      );
+      if (parentDepth >= 5) {
+        return sendErrorResponse(
+          res,
+          "Maximum category depth (5 levels) exceeded",
+          400
+        );
+      }
+
+      // Validate hierarchy (prevent circular references)
+      const isValidHierarchy = await validateHierarchy(
+        parent_id,
+        null,
+        Categories.sequelize
+      );
+      if (!isValidHierarchy) {
+        return sendErrorResponse(res, "Invalid category hierarchy", 400);
+      }
+    }
 
     // Create the category
-    const category = await Categories.create({ name, description });
+    const category = await Categories.create({
+      name,
+      description,
+      parent_id: parent_id || null,
+      status,
+    });
+
+    // Build parent_id_tree path
+    const parentIdTree = await buildParentIdTree(
+      category.id,
+      parent_id,
+      Categories.sequelize
+    );
+    await category.update({ parent_id_tree: parentIdTree });
 
     // If product_ids are provided, create the relationships
     if (product_ids && Array.isArray(product_ids) && product_ids.length > 0) {
@@ -34,13 +104,28 @@ exports.createCategory = async (req, res) => {
       });
     }
 
+    // Fetch the complete category with updated parent_id_tree
+    const completeCategory = await Categories.findByPk(category.id, {
+      include: [
+        {
+          model: Categories,
+          as: "parent",
+          attributes: ["id", "name"],
+        },
+      ],
+    });
+
     return sendSuccessRespose(
       res,
       {
-        category,
+        category: completeCategory,
         products_added: product_ids ? product_ids.length : 0,
+        is_subcategory: !!parent_id,
+        parent_id_tree: parentIdTree,
       },
-      "Category created successfully",
+      parent_id
+        ? "Sub-category created successfully"
+        : "Category created successfully",
       201
     );
   } catch (error) {
@@ -103,34 +188,47 @@ exports.getCategories = async (req, res) => {
         );
       }
     } else {
-      // Get categories without products (default)
-      const categories = await Categories.findAll();
+      // Get categories with product count (default)
+      const categories = await Categories.findAll({
+        order: [["name", "ASC"]],
+      });
 
-      // Transform to drawer format if requested
-      if (drawer === "true") {
-        const transformedCategories = categories.map((category) => ({
-          value: category.id,
-          ...(drawer === "true" && { label: category.name }),
-          // name: category.name,
-          // description: category.description,
-          // created_at: category.created_at,
-          // updated_at: category.updated_at,
-        }));
+      // Get product count for each category
+      const categoriesWithCount = await Promise.all(
+        categories.map(async (category) => {
+          const productCount = await CategoryProduct.count({
+            where: { category_id: category.id },
+          });
 
-        return sendSuccessRespose(
-          res,
-          transformedCategories,
-          "Categories in drawer format fetched successfully",
-          200
-        );
-      } else {
-        return sendSuccessRespose(
-          res,
-          categories,
-          "Categories fetched successfully",
-          200
-        );
-      }
+          return {
+            ...category.toJSON(),
+            product_count: productCount,
+          };
+        })
+      );
+
+      // Build hierarchical tree structure (always return tree format)
+      const buildTree = (parentId = null) => {
+        return categoriesWithCount
+          .filter((category) => category.parent_id === parentId)
+          .map((category) => ({
+            id: category.id.toString(),
+            name: category.name,
+            description: category.description,
+            status: category.status,
+            product_count: category.product_count,
+            children: buildTree(category.id),
+          }));
+      };
+
+      const tree = buildTree();
+
+      return sendSuccessRespose(
+        res,
+        tree,
+        "Categories tree fetched successfully",
+        200
+      );
     }
   } catch (error) {
     console.error("Get categories error:", error);

@@ -74,6 +74,26 @@ module.exports = (sequelize, DataTypes) => {
       password_reset_expires: {
         type: DataTypes.DATE,
       },
+      profile_image_url: {
+        type: DataTypes.STRING(500),
+        allowNull: true,
+        validate: {
+          isValidImageUrl(value) {
+            if (value === null || value === undefined) return true; // Allow null/undefined
+            if (typeof value !== "string") return false;
+
+            // Allow both full URLs and relative paths
+            const isFullUrl = /^https?:\/\//.test(value);
+            const isRelativePath = /^\/uploads\/profiles\//.test(value);
+
+            if (!isFullUrl && !isRelativePath) {
+              throw new Error(
+                "Profile image URL must be a valid URL or relative path starting with /uploads/profiles/"
+              );
+            }
+          },
+        },
+      },
     },
     {
       timestamps: true,

@@ -9,6 +9,7 @@ const {
   settings: Settings,
 } = require("../models");
 const { sendSuccessRespose, sendErrorResponse } = require("../utils/response");
+const { parseDateRange } = require("../utils/dateUtils");
 const Sequelize = require("sequelize");
 
 // Get dashboard overview statistics
@@ -89,32 +90,35 @@ exports.getDashboardOverview = async (req, res) => {
     });
 
     // Calculate percentage changes
-    const salesPercentageChange =
+    let salesPercentageChange;
+    salesPercentageChange =
       previous6MonthsSales > 0
         ? ((current6MonthsSales - previous6MonthsSales) /
             previous6MonthsSales) *
           100
-        : 0;
+        : 100;
 
     const recoupedPercentageChange =
       previous6MonthsRecouped > 0
         ? ((current6MonthsRecouped - previous6MonthsRecouped) /
             previous6MonthsRecouped) *
           100
-        : 0;
+        : 100;
 
     // Calculate deficit amounts (total_sales - total_recouped)
     const current6MonthsDeficit =
       (current6MonthsSales || 0) - (current6MonthsRecouped || 0);
     const previous6MonthsDeficit =
       (previous6MonthsSales || 0) - (previous6MonthsRecouped || 0);
-
+    console.log("previous6MonthsDeficit is here::: ", previous6MonthsDeficit);
     // Calculate deficit percentage change
     const deficitPercentageChange =
       previous6MonthsDeficit !== 0
         ? ((current6MonthsDeficit - previous6MonthsDeficit) /
             Math.abs(previous6MonthsDeficit)) *
           100
+        : previous6MonthsDeficit === 0
+        ? 100
         : 0;
 
     const response = {
@@ -624,6 +628,7 @@ exports.getCustomersTotalSalesAnalytics = async (req, res) => {
       limit = 20,
     } = req.query;
 
+    console.log("start_date:::", start_date, "end_date::", end_date);
     // Build where clause for filters
     let whereClause = {};
 
@@ -639,16 +644,22 @@ exports.getCustomersTotalSalesAnalytics = async (req, res) => {
 
     // Date range filter
     if (start_date && end_date) {
-      const dateFilter = {
-        created_at: {
-          [Sequelize.Op.between]: [new Date(start_date), new Date(end_date)],
-        },
-      };
+      try {
+        const { startDate, endDate } = parseDateRange(start_date, end_date);
 
-      if (whereClause[Sequelize.Op.and]) {
-        whereClause[Sequelize.Op.and].push(dateFilter);
-      } else {
-        whereClause[Sequelize.Op.and] = [dateFilter];
+        const dateFilter = {
+          created_at: {
+            [Sequelize.Op.between]: [startDate, endDate],
+          },
+        };
+
+        if (whereClause[Sequelize.Op.and]) {
+          whereClause[Sequelize.Op.and].push(dateFilter);
+        } else {
+          whereClause[Sequelize.Op.and] = [dateFilter];
+        }
+      } catch (error) {
+        return sendErrorResponse(res, error.message, 400);
       }
     }
 
@@ -665,7 +676,7 @@ exports.getCustomersTotalSalesAnalytics = async (req, res) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     // Get customer sales data with pagination using raw query approach
-    console.log('this is the query here::')
+    console.log("this is the query here dak:::");
     const customerSalesData = await LogsCalcRoi.findAll({
       attributes: [
         "calc_roi_id",

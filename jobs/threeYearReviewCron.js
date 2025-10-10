@@ -39,7 +39,7 @@ const threeYearReviewCron = cron.schedule(
             include: [
               {
                 model: CalcRoi,
-                as: "calcRoi",
+                as: "roi",
                 attributes: ["id", "customer_id"],
                 include: [
                   {
@@ -74,7 +74,7 @@ const threeYearReviewCron = cron.schedule(
       // Process each item and create alerts
       for (const item of threeYearOldItems) {
         try {
-          const customer = item.calcInvoice?.calcRoi?.customer;
+          const customer = item.calcInvoice?.roi?.customer;
 
           if (!customer) {
             console.log(`Skipping item ${item.id} - no customer found`);

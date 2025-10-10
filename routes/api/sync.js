@@ -1,10 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const syncController = require("../../controllers/sync.controller");
-const authMiddleware = require("../../middleware/auth.middleware");
 
-// Apply authentication middleware to all sync routes
-// router.use(authMiddleware);
+// Note: AuthMiddleware.verifyToken is now applied at the parent level in routes/api/index.js
 
 /**
  * @route   POST /api/sync/items
@@ -54,5 +52,47 @@ router.post("/reset-pagination", syncController.resetPagination);
  * @access  Private
  */
 router.post("/force-next-batch", syncController.forceNextBatch);
+
+/**
+ * @route   GET /api/sync/cron/status
+ * @desc    Get QuickBooks sync cron jobs status
+ * @access  Private
+ */
+router.get("/cron/status", syncController.getCronStatus);
+
+/**
+ * @route   POST /api/sync/year
+ * @desc    Sync all data (items, customers, invoices) for a specific year
+ * @access  Private
+ */
+router.post("/year", syncController.syncByYear);
+
+/**
+ * @route   GET /api/sync/year/status
+ * @desc    Get all years sync status (2010-2025)
+ * @access  Private
+ */
+router.get("/year/status", syncController.getYearSyncStatus);
+
+/**
+ * @route   GET /api/sync/year/status/:year
+ * @desc    Get specific year sync status
+ * @access  Private
+ */
+router.get("/year/status/:year", syncController.getSpecificYearStatus);
+
+/**
+ * @route   POST /api/sync/year/reset
+ * @desc    Reset specific year sync status to pending
+ * @access  Private
+ */
+router.post("/year/reset", syncController.resetYearStatus);
+
+/**
+ * @route   POST /api/sync/year/reset-all
+ * @desc    Reset all years sync status to pending
+ * @access  Private
+ */
+router.post("/year/reset-all", syncController.resetAllYearsStatus);
 
 module.exports = router;

@@ -1,5 +1,6 @@
 const { settings: Settings } = require("../models");
 const { sendSuccessRespose, sendErrorResponse } = require("../utils/response");
+const yearSyncStatusManager = require("../utils/yearSyncStatus");
 
 // Get settings (there should only be one settings record)
 exports.getSettings = async (req, res) => {
@@ -12,10 +13,28 @@ exports.getSettings = async (req, res) => {
       return sendErrorResponse(res, "Settings not found", 404);
     }
 
+    // Get year sync status data
+    const allStatus = yearSyncStatusManager.getAllYearsStatus();
+
+    // Convert object to array format
+    const yearsArray = Object.keys(allStatus).map((year) => ({
+      year: parseInt(year),
+      year_status: allStatus[year].year_status,
+      last_sync: allStatus[year].last_sync,
+      start_date: allStatus[year].start_date,
+      end_date: allStatus[year].end_date,
+    }));
+
+    // Combine settings with year sync status
+    const responseData = {
+      ...settings.toJSON(),
+      years: yearsArray,
+    };
+
     return sendSuccessRespose(
       res,
-      settings,
-      "Settings retrieved successfully",
+      responseData,
+      "Settings and year sync status retrieved successfully",
       200
     );
   } catch (error) {

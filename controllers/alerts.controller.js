@@ -72,13 +72,26 @@ exports.createAlert = async (req, res) => {
 // Get all alerts with pagination and filtering
 exports.getAllAlerts = async (req, res) => {
   try {
-    const { page = 1, limit = 10, alert_type, customer_id, search } = req.query;
-    const offset = (page - 1) * limit;
+    const {
+      page = 1,
+      limit = 10,
+      alert_type,
+      customer_id,
+      search,
+      all = false,
+      is_read,
+    } = req.query;
 
     // Build where clause
     const whereClause = {};
     if (alert_type) whereClause.alert_type = alert_type;
     if (customer_id) whereClause.customer_id = customer_id;
+
+    // Add is_read filter
+    if (is_read !== undefined) {
+      whereClause.is_read = is_read === "true";
+    }
+
     if (search) {
       whereClause[Sequelize.Op.or] = [
         { "$customer.first_name$": { [Sequelize.Op.like]: `%${search}%` } },
@@ -87,40 +100,117 @@ exports.getAllAlerts = async (req, res) => {
       ];
     }
 
-    const { count, rows } = await Alerts.findAndCountAll({
-      where: whereClause,
-      include: [
-        {
-          model: Customers,
-          as: "customer",
-          attributes: ["id", "first_name", "last_name", "company_name"],
-        },
-      ],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
-      order: [["created_at", "DESC"]],
-      distinct: true,
-    });
+    // Check if all alerts are requested
+    const shouldGetAll = all === "true";
 
-    const totalPages = Math.ceil(count / limit);
+    if (shouldGetAll) {
+      // Get all alerts without pagination
+      const allAlerts = await Alerts.findAll({
+        where: whereClause,
+        include: [
+          {
+            model: Customers,
+            as: "customer",
+            attributes: ["id", "first_name", "last_name", "company_name"],
+          },
+        ],
+        order: [["created_at", "DESC"]],
+      });
+
+      // Separate alerts into read and unread arrays
+      const readAlerts = allAlerts.filter((alert) => alert.is_read === true);
+      const unreadAlerts = allAlerts.filter((alert) => alert.is_read === false);
+
+      return sendSuccessRespose(
+        res,
+        {
+          read: readAlerts,
+          unread: unreadAlerts,
+          totalAlerts: allAlerts.length,
+          readCount: readAlerts.length,
+          unreadCount: unreadAlerts.length,
+        },
+        "All alerts retrieved successfully",
+        200
+      );
+    } else {
+      // Use pagination for regular requests
+      const offset = (parseInt(page) - 1) * parseInt(limit);
+
+      const { count, rows } = await Alerts.findAndCountAll({
+        where: whereClause,
+        include: [
+          {
+            model: Customers,
+            as: "customer",
+            attributes: ["id", "first_name", "last_name", "company_name"],
+          },
+        ],
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        order: [["created_at", "DESC"]],
+        distinct: true,
+      });
+
+      const totalPages = Math.ceil(count / limit);
+
+      return sendSuccessRespose(
+        res,
+        {
+          alerts: rows,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages,
+            totalAlerts: count,
+            alertsPerPage: parseInt(limit),
+          },
+        },
+        "Alerts retrieved successfully",
+        200
+      );
+    }
+  } catch (error) {
+    console.error("Get all alerts error:", error);
+    return sendErrorResponse(res, "Failed to get alerts", 500);
+  }
+};
+
+// Mark all alerts as read
+exports.markAllAlertsAsRead = async (req, res) => {
+  try {
+    const { read } = req.body;
+
+    // Validate request
+    if (read !== true) {
+      return sendErrorResponse(
+        res,
+        "Invalid request. Expected 'read': true in request body",
+        400
+      );
+    }
+
+    // Update all unread alerts to read
+    const [updatedCount] = await Alerts.update(
+      { is_read: true },
+      {
+        where: {
+          is_read: false,
+        },
+      }
+    );
 
     return sendSuccessRespose(
       res,
       {
-        alerts: rows,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages,
-          totalAlerts: count,
-          alertsPerPage: parseInt(limit),
-        },
+        updatedCount,
+        message: `Successfully marked ${updatedCount} alerts as read`,
       },
-      "Alerts retrieved successfully",
+      "All alerts marked as read successfully",
       200
     );
   } catch (error) {
-    console.error("Get all alerts error:", error);
-    return sendErrorResponse(res, "Failed to get alerts", 500);
+    console.error("Mark all alerts as read error:", error);
+    return sendErrorResponse(res, "Failed to mark alerts as read", 500);
   }
 };
 

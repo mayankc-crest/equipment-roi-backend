@@ -29,4 +29,12 @@ router.get("/stats", customersCtrl.getCustomerStats);
  */
 router.get("/:id", customersCtrl.getCustomerById);
 
+/**
+ * @description Get customer ROI products
+ * @path /api/customers/:customer_id/roi-products
+ * @method GET
+ * @param {number} customer_id - Customer ID
+ */
+router.get("/roi-products/:customer_id/", customersCtrl.getCustomerROIProducts);
+
 module.exports = router;

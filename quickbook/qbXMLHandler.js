@@ -78,44 +78,67 @@ class QBXMLHandler {
    *
    * @param {Function} callback - Callback function(err, requestArray)
    */
-  fetchRequests(callback) {
+  async fetchRequests(callback) {
     try {
-      console.log("Fetching qbXML requests...");
-
-      // Clear previous queue
-      this.requestQueue = [];
-
-      // Check if we have more items to fetch
-      if (this.itemPagination.hasMoreItems) {
-        // Only add Item query - focusing on item sync only
-        // this.addItemQuery();
-        console.log(
-          `Generated ${this.requestQueue.length} qbXML requests (Items only)`
-        );
-      } else {
-        console.log("🏁 No more items to fetch - pagination complete");
-        console.log(
-          `📊 Total items processed: ${this.itemPagination.totalItemsProcessed}`
-        );
+      // If we have requests in queue, return them
+      if (this.requestQueue.length > 0) {
+        const requestsToReturn = [...this.requestQueue];
+        this.requestQueue = []; // Clear the queue after returning
+        callback(null, requestsToReturn);
+        return;
       }
 
-      // Add Customer query (uncommented for manual sync)
-      // this.addCustomerQuery();
-      // Add Invoice query with line items to get detailed transaction data (uncommented for manual sync)
-      // this.addInvoiceQuery();
-      // Add Estimate query with line items if you need estimates
-      // this.addEstimateQuery();
-      // this.addVendorQuery();
+      // If no requests in queue, generate regular sync requests
+      await this.generateRegularSyncRequests();
 
-      // You can also add custom requests based on your business logic
-      // this.addCustomRequests();
-
-      // Return the requests array
-      callback(null, this.requestQueue);
+      // Return the generated requests
+      const requestsToReturn = [...this.requestQueue];
+      this.requestQueue = []; // Clear the queue after returning
+      callback(null, requestsToReturn);
     } catch (error) {
-      console.error("Error in fetchRequests:", error);
-      callback(error, []);
+      callback(error, null);
     }
+  }
+
+  /**
+   * Generate regular sync requests (items, customers, invoices)
+   */
+  async generateRegularSyncRequests() {
+    // Check if we have more items to fetch
+    if (this.itemPagination.hasMoreItems) {
+      await this.addItemQuery();
+    }
+
+    // Add Customer query
+    await this.addCustomerQuery();
+
+    // Add Invoice query
+    await this.addInvoiceQuery();
+  }
+
+  /**
+   * Add requests to queue for manual sync
+   */
+  addToQueue(requests) {
+    if (Array.isArray(requests)) {
+      this.requestQueue.push(...requests);
+    } else {
+      this.requestQueue.push(requests);
+    }
+  }
+
+  /**
+   * Get current queue length
+   */
+  getQueueLength() {
+    return this.requestQueue.length;
+  }
+
+  /**
+   * Clear the queue
+   */
+  clearQueue() {
+    this.requestQueue = [];
   }
 
   /**
@@ -125,7 +148,40 @@ class QBXMLHandler {
    */
   handleResponse(response) {
     try {
-      console.log("Received qbXML response");
+      console.log("📥 ===== QBWC RESPONSE RECEIVED ======");
+      console.log(`⏰ Response received at: ${new Date().toISOString()}`);
+      console.log(
+        `📏 Response length: ${response ? response.length : 0} characters`
+      );
+
+      // Check if response is empty or null
+      if (!response || response.trim() === "") {
+        console.log("⚠️ Empty response received from QuickBooks");
+        console.log("📥 ===== QBWC RESPONSE HANDLING COMPLETED ======");
+        return;
+      }
+
+      // Check if response is too short (likely empty)
+      if (response.length < 100) {
+        console.log(
+          "⚠️ Very short response received from QuickBooks:",
+          response
+        );
+        console.log("📥 ===== QBWC RESPONSE HANDLING COMPLETED ======");
+        return;
+      }
+
+      console.log(
+        "✅ Received qbXML response (length:",
+        response.length,
+        "characters)"
+      );
+
+      // Write to debug log
+      this.writeYearSyncDebugLog(
+        "INFO",
+        `QBWC returned response with ${response.length} characters`
+      );
 
       if (this.config.logResponses) {
         this.responseLog.push({
@@ -137,7 +193,7 @@ class QBXMLHandler {
       // Parse and process the response
       this.processResponse(response);
     } catch (error) {
-      console.error("Error handling response:", error);
+      console.error("❌ Error handling response:", error);
       this.didReceiveError(error);
     }
   }
@@ -168,13 +224,70 @@ class QBXMLHandler {
   /**
    * Add a customer query request to the queue
    */
-  addCustomerQuery() {
+  async addCustomerQuery() {
+    try {
+      // Get dynamic date range for customer sync
+      const dateRange = await this.getCustomerDateRange();
+
+      // Convert ISO timestamps to date format for QuickBooks
+      const fromDate = dateRange.startDate.includes("T")
+        ? dateRange.startDate.split("T")[0]
+        : dateRange.startDate;
+      const toDate = dateRange.endDate.includes("T")
+        ? dateRange.endDate.split("T")[0]
+        : dateRange.endDate;
+
+      console.log(
+        `📅 Converted dates for QuickBooks: ${fromDate} to ${toDate}`
+      );
+
+      const customerQuery = `<?xml version="1.0" encoding="utf-8"?>
+<?qbxml version="13.0"?>
+<QBXML>
+    <QBXMLMsgsRq onError="stopOnError">
+        <CustomerQueryRq requestID="1">
+            <ActiveStatus>All</ActiveStatus>
+            <FromModifiedDate>${fromDate}</FromModifiedDate>
+            <ToModifiedDate>${toDate}</ToModifiedDate>
+        </CustomerQueryRq>
+    </QBXMLMsgsRq>
+</QBXML>`;
+
+      this.requestQueue.push(customerQuery);
+    } catch (error) {
+      // Fallback to default query if there's an error
+      const fallbackQuery = `<?xml version="1.0" encoding="utf-8"?>
+<?qbxml version="13.0"?>
+<QBXML>
+    <QBXMLMsgsRq onError="stopOnError">
+        <CustomerQueryRq requestID="1">
+            <ActiveStatus>All</ActiveStatus>
+        </CustomerQueryRq>
+    </QBXMLMsgsRq>
+</QBXML>`;
+      console.log("📄 Using fallback customer query (no date filter)");
+      this.requestQueue.push(fallbackQuery);
+    }
+  }
+
+  /**
+   * Add a customer query request for a specific year
+   */
+  addCustomerQueryForYear(startDate, endDate) {
+    // Convert ISO timestamps to date format for QuickBooks
+    const fromDate = startDate.includes("T")
+      ? startDate.split("T")[0]
+      : startDate;
+    const toDate = endDate.includes("T") ? endDate.split("T")[0] : endDate;
+
     const customerQuery = `<?xml version="1.0" encoding="utf-8"?>
 <?qbxml version="13.0"?>
 <QBXML>
     <QBXMLMsgsRq onError="stopOnError">
         <CustomerQueryRq requestID="1">
             <ActiveStatus>All</ActiveStatus>
+            <FromModifiedDate>${fromDate}</FromModifiedDate>
+            <ToModifiedDate>${toDate}</ToModifiedDate>
         </CustomerQueryRq>
     </QBXMLMsgsRq>
 </QBXML>`;
@@ -185,30 +298,272 @@ class QBXMLHandler {
   /**
    * Add an invoice query request to the queue
    */
-  addInvoiceQuery() {
-    const invoiceQuery = `<?xml version="1.0" encoding="utf-8"?>
+  async addInvoiceQuery() {
+    try {
+      // Get dynamic date range for invoice sync
+      const dateRange = await this.getInvoiceDateRange();
+
+      // Convert ISO timestamps to date format for QuickBooks
+      const fromDate = dateRange.startDate.includes("T")
+        ? dateRange.startDate.split("T")[0]
+        : dateRange.startDate;
+      const toDate = dateRange.endDate.includes("T")
+        ? dateRange.endDate.split("T")[0]
+        : dateRange.endDate;
+
+      console.log(
+        `📅 Converted dates for QuickBooks: ${fromDate} to ${toDate}`
+      );
+
+      const invoiceQuery = `<?xml version="1.0" encoding="utf-8"?>
+                            <?qbxml version="13.0"?>
+                              <QBXML>
+                                <QBXMLMsgsRq onError="stopOnError">
+                                  <InvoiceQueryRq requestID="2">
+                                    <TxnDateRangeFilter>
+                                      <FromTxnDate>${fromDate}</FromTxnDate>
+                                      <ToTxnDate>${toDate}</ToTxnDate>
+                                    </TxnDateRangeFilter>
+                                    <IncludeLineItems>true</IncludeLineItems>
+                                  </InvoiceQueryRq>
+                                </QBXMLMsgsRq>
+                              </QBXML>`;
+
+      this.requestQueue.push(invoiceQuery);
+    } catch (error) {
+      // Fallback to default date range if there's an error
+      const fallbackQuery = `<?xml version="1.0" encoding="utf-8"?>
 <?qbxml version="13.0"?>
 <QBXML>
     <QBXMLMsgsRq onError="stopOnError">
         <InvoiceQueryRq requestID="2">
             <TxnDateRangeFilter>
-                <FromTxnDate>2025-09-18</FromTxnDate>
-                <ToTxnDate>2025-09-18</ToTxnDate>
+                <FromTxnDate>2025-01-01</FromTxnDate>
+                <ToTxnDate>${new Date().toISOString().split("T")[0]}</ToTxnDate>
+            </TxnDateRangeFilter>
+            <IncludeLineItems>true</IncludeLineItems>
+        </InvoiceQueryRq>
+    </QBXMLMsgsRq>
+</QBXML>`;
+      console.log("📄 Using fallback invoice query (2025-01-01 to now)");
+      this.requestQueue.push(fallbackQuery);
+    }
+  }
+
+  /**
+   * Add an invoice query request for a specific year
+   */
+  async addInvoiceQueryForYear(startDate, endDate) {
+    try {
+      // Convert ISO timestamps to date format for QuickBooks
+      const fromDate = startDate.includes("T")
+        ? startDate.split("T")[0]
+        : startDate;
+      const toDate = endDate.includes("T") ? endDate.split("T")[0] : endDate;
+
+      const invoiceQuery = `<?xml version="1.0" encoding="utf-8"?>
+<?qbxml version="13.0"?>
+<QBXML>
+    <QBXMLMsgsRq onError="stopOnError">
+        <InvoiceQueryRq requestID="2">
+            <TxnDateRangeFilter>
+                <FromTxnDate>${fromDate}</FromTxnDate>
+                <ToTxnDate>${toDate}</ToTxnDate>
             </TxnDateRangeFilter>
             <IncludeLineItems>true</IncludeLineItems>
         </InvoiceQueryRq>
     </QBXMLMsgsRq>
 </QBXML>`;
 
-    this.requestQueue.push(invoiceQuery);
+      this.requestQueue.push(invoiceQuery);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Get dynamic date range for invoice sync
+   * @returns {Object} Object with startDate and endDate
+   */
+  async getInvoiceDateRange() {
+    try {
+      // Import the Invoice model
+      const db = require("../models");
+      const Invoices = db.invoices;
+
+      // Get the last invoice's created_at date
+      const lastInvoice = await Invoices.findOne({
+        order: [["createdAt", "DESC"]],
+        attributes: ["createdAt"],
+      });
+
+      let startDate;
+      let endDate = new Date().toISOString(); // Current date and time in ISO format
+
+      if (lastInvoice && lastInvoice.createdAt) {
+        // Use the last invoice's created_at date and time as start date
+        startDate = new Date(lastInvoice.createdAt).toISOString();
+        console.log(`📅 Found last invoice from: ${startDate}`);
+      } else {
+        // Edge case: No invoices in database, use default start date
+        console.log("in the else condition daxy:: ");
+        startDate = "2025-01-01T00:00:00.000Z";
+        console.log(
+          `📅 No invoices found in database, using default start date: ${startDate}`
+        );
+      }
+      console.log("before the return condition daxy:: ");
+      return {
+        startDate: startDate,
+        endDate: endDate,
+      };
+    } catch (error) {
+      // Return fallback dates if there's an error
+      console.log("in the catch condition daxy:: ", error);
+      return {
+        startDate: "2025-01-01T00:00:00.000Z",
+        endDate: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Get dynamic date range for customer sync
+   * @returns {Object} Object with startDate and endDate
+   */
+  async getCustomerDateRange() {
+    try {
+      // Import the Customer model
+      const db = require("../models");
+      const Customers = db.customers;
+
+      // Get the last customer's created_at date
+      const lastCustomer = await Customers.findOne({
+        order: [["createdAt", "DESC"]],
+        attributes: ["createdAt"],
+      });
+
+      let startDate;
+      let endDate = new Date().toISOString(); // Current date and time in ISO format
+
+      if (lastCustomer && lastCustomer.createdAt) {
+        // Use the last customer's created_at date and time as start date
+        startDate = new Date(lastCustomer.createdAt).toISOString();
+        console.log(`📅 Found last customer from: ${startDate}`);
+      } else {
+        // Edge case: No customers in database, use default start date
+        console.log("in the else condition for customers:: ");
+        startDate = "2025-01-01T00:00:00.000Z";
+        console.log(
+          `📅 No customers found in database, using default start date: ${startDate}`
+        );
+      }
+      console.log("before the return condition for customers:: ");
+      return {
+        startDate: startDate,
+        endDate: endDate,
+      };
+    } catch (error) {
+      // Return fallback dates if there's an error
+      console.log("in the catch condition for customers:: ", error);
+      return {
+        startDate: "2025-01-01T00:00:00.000Z",
+        endDate: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Get dynamic date range for item sync
+   * @returns {Object} Object with startDate and endDate
+   */
+  async getItemDateRange() {
+    try {
+      // Import the Product model
+      const db = require("../models");
+      const Products = db.products;
+
+      // Get the last product's created_at date
+      const lastProduct = await Products.findOne({
+        order: [["createdAt", "DESC"]],
+        attributes: ["createdAt"],
+      });
+
+      let startDate;
+      let endDate = new Date().toISOString(); // Current date and time in ISO format
+
+      if (lastProduct && lastProduct.createdAt) {
+        // Use the last product's created_at date and time as start date
+        startDate = new Date(lastProduct.createdAt).toISOString();
+        console.log(`📅 Found last product from: ${startDate}`);
+      } else {
+        // Edge case: No products in database, use default start date
+        console.log("in the else condition for products:: ");
+        startDate = "2025-01-01T00:00:00.000Z";
+        console.log(
+          `📅 No products found in database, using default start date: ${startDate}`
+        );
+      }
+      console.log("before the return condition for products:: ");
+      return {
+        startDate: startDate,
+        endDate: endDate,
+      };
+    } catch (error) {
+      // Return fallback dates if there's an error
+      console.log("in the catch condition for products:: ", error);
+      return {
+        startDate: "2025-01-01T00:00:00.000Z",
+        endDate: new Date().toISOString(),
+      };
+    }
   }
 
   /**
    * Add an item query request to the queue
    */
-  addItemQuery() {
-    // Simple query without complex filters - this should work reliably
-    const itemQuery = `<?xml version="1.0" encoding="utf-8"?>
+  async addItemQuery() {
+    try {
+      // Get dynamic date range for item sync
+      const dateRange = await this.getItemDateRange();
+      console.log("items query has been called:::");
+
+      // Convert ISO timestamps to date format for QuickBooks
+      const fromDate = dateRange.startDate.includes("T")
+        ? dateRange.startDate.split("T")[0]
+        : dateRange.startDate;
+      const toDate = dateRange.endDate.includes("T")
+        ? dateRange.endDate.split("T")[0]
+        : dateRange.endDate;
+
+      console.log(
+        `📅 Converted dates for QuickBooks: ${fromDate} to ${toDate}`
+      );
+
+      const itemQuery = `<?xml version="1.0" encoding="utf-8"?>
+<?qbxml version="7.0"?>
+<QBXML>
+    <QBXMLMsgsRq onError="stopOnError">
+        <ItemQueryRq requestID="1739">
+            <ActiveStatus>ActiveOnly</ActiveStatus>
+            <FromModifiedDate>${fromDate}</FromModifiedDate>
+            <ToModifiedDate>${toDate}</ToModifiedDate>
+        </ItemQueryRq>
+    </QBXMLMsgsRq>
+</QBXML>`;
+
+      console.log(
+        `📄 Adding item query (batch: ${this.itemPagination.currentBatch + 1})`
+      );
+      console.log(
+        `🔄 Dynamic query - will fetch items from ${fromDate} to ${toDate}`
+      );
+
+      this.requestQueue.push(itemQuery);
+    } catch (error) {
+      // Fallback to simple query if there's an error
+      console.log("items query fallback called:::");
+      const fallbackQuery = `<?xml version="1.0" encoding="utf-8"?>
 <?qbxml version="7.0"?>
 <QBXML>
     <QBXMLMsgsRq onError="stopOnError">
@@ -217,11 +572,32 @@ class QBXMLHandler {
         </ItemQueryRq>
     </QBXMLMsgsRq>
 </QBXML>`;
+      console.log("📄 Using fallback item query (no date filter)");
+      this.requestQueue.push(fallbackQuery);
+    }
+  }
 
-    console.log(
-      `📄 Adding item query (batch: ${this.itemPagination.currentBatch + 1})`
-    );
-    console.log(`🔄 Simple query - will fetch first 5 active items`);
+  /**
+   * Add an item query request for a specific year
+   */
+  addItemQueryForYear(startDate, endDate) {
+    // Convert ISO timestamps to date format for QuickBooks
+    const fromDate = startDate.includes("T")
+      ? startDate.split("T")[0]
+      : startDate;
+    const toDate = endDate.includes("T") ? endDate.split("T")[0] : endDate;
+
+    const itemQuery = `<?xml version="1.0" encoding="utf-8"?>
+<?qbxml version="7.0"?>
+<QBXML>
+    <QBXMLMsgsRq onError="stopOnError">
+        <ItemQueryRq requestID="1739">
+            <ActiveStatus>All</ActiveStatus>
+            <FromModifiedDate>${fromDate}</FromModifiedDate>
+            <ToModifiedDate>${toDate}</ToModifiedDate>
+        </ItemQueryRq>
+    </QBXMLMsgsRq>
+</QBXML>`;
 
     this.requestQueue.push(itemQuery);
   }
@@ -233,23 +609,77 @@ class QBXMLHandler {
    */
   processResponse(response) {
     try {
+      console.log("🔍 Processing response...");
+
+      // Check if response contains any data
+      if (!response.includes("<") || !response.includes(">")) {
+        console.log("⚠️ Invalid XML response received - no XML tags found");
+        return;
+      }
+
+      // Check for QuickBooks errors first
+      if (
+        response.includes('statusCode="3020"') ||
+        response.includes('statusSeverity="Error"')
+      ) {
+        console.log("❌ QuickBooks returned an error in response");
+        this.handleQuickBooksError(response);
+        return;
+      }
+
       // Process different types of responses
       if (response.includes("<ItemQueryRs")) {
+        console.log("📦 Processing ItemQuery response");
         this.handleItemQueryResponse(response);
       } else if (response.includes("<CustomerQueryRs")) {
+        console.log("👥 Processing CustomerQuery response");
         this.handleCustomerQueryResponse(response);
       } else if (response.includes("<InvoiceQueryRs")) {
+        console.log("🧾 Processing InvoiceQuery response");
         this.handleInvoiceQueryResponse(response);
       } else {
         console.log(
-          "Non-item/customer/invoice response received - skipping processing"
+          "❓ Non-item/customer/invoice response received - skipping processing"
         );
+        console.log("Response preview:", response.substring(0, 200) + "...");
       }
 
       // Save response to file for debugging
       this.saveResponseToFile(response);
     } catch (error) {
-      console.error("Error processing response:", error);
+      console.error("❌ Error processing response:", error);
+    }
+  }
+
+  /**
+   * Handle QuickBooks errors in response
+   * @param {string} response - qbXML response containing error
+   */
+  handleQuickBooksError(response) {
+    try {
+      console.log("🚨 ===== QUICKBOOKS ERROR DETECTED ======");
+
+      // Extract error details using regex
+      const statusCodeMatch = response.match(/statusCode="([^"]+)"/);
+      const statusMessageMatch = response.match(/statusMessage="([^"]+)"/);
+
+      const statusCode = statusCodeMatch ? statusCodeMatch[1] : "Unknown";
+      const statusMessage = statusMessageMatch
+        ? statusMessageMatch[1]
+        : "Unknown error";
+
+      console.log(`❌ Error Code: ${statusCode}`);
+      console.log(`❌ Error Message: ${statusMessage}`);
+
+      // Write to debug log
+      this.writeYearSyncDebugLog(
+        "ERROR",
+        `QuickBooks Error ${statusCode}: ${statusMessage}`
+      );
+
+      console.log("🚨 ===== QUICKBOOKS ERROR HANDLED ======");
+    } catch (error) {
+      console.error("❌ Error parsing QuickBooks error:", error);
     }
   }
 
@@ -462,6 +892,12 @@ class QBXMLHandler {
   async syncCustomersToDatabase(response) {
     try {
       console.log("💾 Syncing customers to database...");
+
+      // Check if response is empty or invalid
+      if (!response || response.trim() === "") {
+        console.log("⚠️ Empty response received for customers sync");
+        return;
+      }
 
       // First, parse the XML response to extract customers
       const customers = this.parseCustomerXML(response);
@@ -789,13 +1225,22 @@ class QBXMLHandler {
    */
   async syncInvoicesToDatabase(response) {
     try {
-      console.log("💾 Syncing invoices to database...");
+      console.log("🧾 ===== SYNCING INVOICES TO DATABASE ======");
+      console.log(`⏰ Sync started at: ${new Date().toISOString()}`);
+
+      // Check if response is empty or invalid
+      if (!response || response.trim() === "") {
+        console.log("⚠️ Empty response received for invoices sync");
+        console.log("🧾 ===== INVOICE SYNC COMPLETED (NO DATA) ======");
+        return;
+      }
 
       // First, parse the XML response to extract invoices
       const invoices = this.parseInvoiceXML(response);
 
       if (!invoices || invoices.length === 0) {
         console.log("⚠️ No invoices found in XML response");
+        console.log("🧾 ===== INVOICE SYNC COMPLETED (NO DATA) ======");
         return;
       }
 
@@ -925,7 +1370,10 @@ class QBXMLHandler {
             // Update existing invoice
             // console.log("THE existing invoice is here :::", existingInvoice);
             if (CalROICustomer) {
-              if (!existingInvoice.is_calculated) {
+              if (
+                !existingInvoice.is_calculated &&
+                !existingInvoice.is_sync_calculated
+              ) {
                 try {
                   const calcInvoice = await db.calc_invoices.create({
                     roi_id: calROIID,
@@ -939,7 +1387,8 @@ class QBXMLHandler {
                   calcInvoiceId = calcInvoice.id;
                   // we need to add the update for is_calculated
                   await existingInvoice.update({
-                    is_calculated: true,
+                    // is_calculated: true,
+                    is_sync_calculated: true,
                   });
                   console.log(
                     "invoice got created in the calc_invoice table::: ",
@@ -1026,7 +1475,8 @@ class QBXMLHandler {
                 });
                 calcInvoiceId = newCalcInvoice.id;
                 await newInvoice.update({
-                  is_calculated: true,
+                  // is_calculated: true,
+                  is_sync_calculated: true,
                 });
               } catch (error) {
                 console.error(
@@ -1065,14 +1515,24 @@ class QBXMLHandler {
       console.log(
         `📊 Invoice Sync Summary: Created=${createdCount}, Updated=${updatedCount}, Skipped=${skippedCount}`
       );
-      console.log(
-        `✅ Successfully synced ${invoices.length} invoices to database`
-      );
 
       // Save parsed data to file for debugging
       this.saveParsedInvoiceDataToFile(invoices, response);
+
+      console.log(
+        `✅ Successfully synced ${invoices.length} invoices to database`
+      );
+      console.log(`⏰ Sync completed at: ${new Date().toISOString()}`);
+      console.log("🧾 ===== INVOICE SYNC COMPLETED ======");
+
+      // Write to debug log
+      this.writeYearSyncDebugLog(
+        "INFO",
+        `Successfully synced ${invoices.length} invoices to database`
+      );
     } catch (error) {
       console.error("❌ Error syncing invoices to database:", error);
+      console.log("🧾 ===== INVOICE SYNC FAILED ======");
     }
   }
   /**
@@ -1081,7 +1541,14 @@ class QBXMLHandler {
    * @param {string} response - Customer query response
    */
   handleCustomerQueryResponse(response) {
-    console.log("Processing customer query response");
+    console.log("👥 Processing customer query response");
+
+    // Check if response is empty
+    if (!response || response.trim() === "") {
+      console.log("⚠️ Empty response received for customer query");
+      return;
+    }
+
     // Implement your customer data processing logic here
     // You might want to parse the XML and store in database
     this.syncCustomersToDatabase(response);
@@ -1093,7 +1560,14 @@ class QBXMLHandler {
    * @param {string} response - Invoice query response
    */
   handleInvoiceQueryResponse(response) {
-    console.log("Processing invoice query response");
+    console.log("🧾 Processing invoice query response");
+
+    // Check if response is empty
+    if (!response || response.trim() === "") {
+      console.log("⚠️ Empty response received for invoice query");
+      return;
+    }
+
     // Sync invoices to database
     this.syncInvoicesToDatabase(response);
   }
@@ -1104,7 +1578,13 @@ class QBXMLHandler {
    * @param {string} response - Item query response
    */
   handleItemQueryResponse(response) {
-    console.log("Processing item query response");
+    console.log("📦 Processing item query response");
+
+    // Check if response is empty
+    if (!response || response.trim() === "") {
+      console.log("⚠️ Empty response received for item query");
+      return;
+    }
 
     // Update batch counter
     this.itemPagination.currentBatch++;
@@ -1121,6 +1601,12 @@ class QBXMLHandler {
   async syncItemsToDatabase(response) {
     try {
       console.log("💾 Syncing items to database...");
+
+      // Check if response is empty or invalid
+      if (!response || response.trim() === "") {
+        console.log("⚠️ Empty response received for items sync");
+        return;
+      }
 
       // First, parse the XML response to extract items
       const items = this.parseItemXML(response);
@@ -1480,6 +1966,29 @@ class QBXMLHandler {
   }
 
   /**
+   * Write debug log entry for year sync tracking
+   * @param {string} level - Log level (INFO, ERROR, WARN)
+   * @param {string} message - Log message
+   */
+  writeYearSyncDebugLog(level, message) {
+    try {
+      const timestamp = new Date().toISOString();
+      const logEntry = `[${timestamp}] [${level}] ${message}\n`;
+      const logPath = path.join(__dirname, "..", "logs", "year-sync-debug.log");
+
+      // Ensure logs directory exists
+      const logsDir = path.dirname(logPath);
+      if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir, { recursive: true });
+      }
+
+      fs.appendFileSync(logPath, logEntry, "utf8");
+    } catch (error) {
+      console.error("Error writing year sync debug log:", error);
+    }
+  }
+
+  /**
    * Save error to file for debugging
    *
    * @param {Object} error - Error object
@@ -1769,16 +2278,16 @@ class QBXMLHandler {
               if (productIds.includes(product.id)) {
                 amount = amount + lineItem.amount;
 
-                // Create entry in calc_invoice_line_items
-                await db.calc_invoice_line_items.create({
-                  calc_invoice_id: calcInvoiceId,
-                  line_item_id: existingLineItem.id,
-                  quantity: lineItem.quantity,
-                  price: lineItem.unitPrice,
-                  total_price: lineItem.amount,
-                  product_condition: "new",
-                  sale_type: "sold",
-                });
+                // commenting below logic which create products in the calc_invoice_line_items table
+                // await db.calc_invoice_line_items.create({
+                //   calc_invoice_id: calcInvoiceId,
+                //   line_item_id: existingLineItem.id,
+                //   quantity: lineItem.quantity,
+                //   price: lineItem.unitPrice,
+                //   total_price: lineItem.amount,
+                //   product_condition: "new",
+                //   sale_type: "sold",
+                // });
               }
             }
           } else {
@@ -1791,16 +2300,16 @@ class QBXMLHandler {
               if (productIds.includes(product.id)) {
                 amount = amount + lineItem.amount;
 
-                // Create entry in calc_invoice_line_items
-                await db.calc_invoice_line_items.create({
-                  calc_invoice_id: calcInvoiceId,
-                  line_item_id: newLineItem.id,
-                  quantity: lineItem.quantity,
-                  price: lineItem.unitPrice,
-                  total_price: lineItem.amount,
-                  product_condition: "new",
-                  sale_type: "sold",
-                });
+                // commenting below logic which create products in the calc_invoice_line_items table
+                // await db.calc_invoice_line_items.create({
+                //   calc_invoice_id: calcInvoiceId,
+                //   line_item_id: newLineItem.id,
+                //   quantity: lineItem.quantity,
+                //   price: lineItem.unitPrice,
+                //   total_price: lineItem.amount,
+                //   product_condition: "new",
+                //   sale_type: "sold",
+                // });
               }
             }
           }

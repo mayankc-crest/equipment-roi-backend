@@ -1,0 +1,114 @@
+{
+  "2010": {
+    "year": 2010,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2010-01-01",
+    "end_date": "2010-12-31"
+  },
+  "2011": {
+    "year": 2011,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2011-01-01",
+    "end_date": "2011-12-31"
+  },
+  "2012": {
+    "year": 2012,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2012-01-01",
+    "end_date": "2012-12-31"
+  },
+  "2013": {
+    "year": 2013,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2013-01-01",
+    "end_date": "2013-12-31"
+  },
+  "2014": {
+    "year": 2014,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2014-01-01",
+    "end_date": "2014-12-31"
+  },
+  "2015": {
+    "year": 2015,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2015-01-01",
+    "end_date": "2015-12-31"
+  },
+  "2016": {
+    "year": 2016,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2016-01-01",
+    "end_date": "2016-12-31"
+  },
+  "2017": {
+    "year": 2017,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2017-01-01",
+    "end_date": "2017-12-31"
+  },
+  "2018": {
+    "year": 2018,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2018-01-01",
+    "end_date": "2018-12-31"
+  },
+  "2019": {
+    "year": 2019,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2019-01-01",
+    "end_date": "2019-12-31"
+  },
+  "2020": {
+    "year": 2020,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2020-01-01",
+    "end_date": "2020-12-31"
+  },
+  "2021": {
+    "year": 2021,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2021-01-01",
+    "end_date": "2021-12-31"
+  },
+  "2022": {
+    "year": 2022,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2022-01-01",
+    "end_date": "2022-12-31"
+  },
+  "2023": {
+    "year": 2023,
+    "year_status": "pending",
+    "last_sync": null,
+    "start_date": "2023-01-01",
+    "end_date": "2023-12-31"
+  },
+  "2024": {
+    "year": 2024,
+    "year_status": "completed",
+    "last_sync": "2025-09-23T14:38:04.270Z",
+    "start_date": "2024-01-01",
+    "end_date": "2024-12-31"
+  },
+  "2025": {
+    "year": 2025,
+    "year_status": "completed",
+    "last_sync": "2025-09-23T03:31:50.059Z",
+    "start_date": "2025-01-01",
+    "end_date": "2025-12-31"
+  }
+}

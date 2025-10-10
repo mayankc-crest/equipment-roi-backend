@@ -21,6 +21,22 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: "active",
         allowNull: false,
       },
+      parent_id: {
+        type: DataTypes.BIGINT(20),
+        allowNull: true,
+        references: {
+          model: "categories",
+          key: "id",
+        },
+        onUpdate: "CASCADE",
+        onDelete: "CASCADE",
+      },
+      parent_id_tree: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        comment:
+          "Colon-separated path from root to current category (e.g., '1:2:3:4:6')",
+      },
     },
     {
       timestamps: true,
@@ -36,6 +52,16 @@ module.exports = (sequelize, DataTypes) => {
       foreignKey: "category_id",
       otherKey: "product_id",
       as: "products",
+    });
+
+    // Self-referencing hierarchical relationship
+    Category.belongsTo(models.categories, {
+      foreignKey: "parent_id",
+      as: "parent",
+    });
+    Category.hasMany(models.categories, {
+      foreignKey: "parent_id",
+      as: "children",
     });
   };
 

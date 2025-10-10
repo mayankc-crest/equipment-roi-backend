@@ -2,12 +2,17 @@ const bcrypt = require("bcrypt");
 const { users } = require("../models");
 const { sendSuccessRespose, sendErrorResponse } = require("../utils/response");
 const Sequelize = require("sequelize");
+const {
+  generateFileUrl,
+  deleteProfileImage,
+  extractFilenameFromUrl,
+} = require("../utils/fileUpload");
 
 class UsersController {
   // Create a new user (admin/super only)
   static async createUser(req, res) {
     try {
-      const {
+      let {
         email,
         password,
         first_name,
@@ -22,6 +27,7 @@ class UsersController {
         zip_code,
         role = "sales representative",
         is_active = true,
+        profile_image_url,
       } = req.body;
 
       // Validate required fields
@@ -29,6 +35,26 @@ class UsersController {
         return sendErrorResponse(
           res,
           "Email, password, first name, and last name are required",
+          400
+        );
+      }
+
+      // Validate and normalize role field
+      if (role && Array.isArray(role)) {
+        role = role[0]; // Take the first element if it's an array
+      }
+
+      // Validate role value
+      const validRoles = [
+        "super",
+        "admin",
+        "Data entry",
+        "sales representative",
+      ];
+      if (role && !validRoles.includes(role)) {
+        return sendErrorResponse(
+          res,
+          `Invalid role. Must be one of: ${validRoles.join(", ")}`,
           400
         );
       }
@@ -47,6 +73,16 @@ class UsersController {
       const saltRounds = 10;
       const hashedPassword = await bcrypt.hash(password, saltRounds);
 
+      // Handle profile image URL (from form data or direct URL)
+      let finalProfileImageUrl = null;
+      if (req.file) {
+        // File uploaded via form data
+        finalProfileImageUrl = generateFileUrl(req.file.filename);
+      } else if (profile_image_url) {
+        // Direct URL provided
+        finalProfileImageUrl = profile_image_url;
+      }
+
       // Create user
       const user = await users.create({
         email,
@@ -63,6 +99,7 @@ class UsersController {
         zip_code,
         role,
         is_active,
+        profile_image_url: finalProfileImageUrl,
       });
 
       // Remove password from response
@@ -201,7 +238,7 @@ class UsersController {
   static async updateUser(req, res) {
     try {
       const { id } = req.params;
-      const {
+      let {
         first_name,
         last_name,
         email,
@@ -215,7 +252,30 @@ class UsersController {
         zip_code,
         role,
         is_active,
+        profile_image_url,
       } = req.body;
+
+      // Validate and normalize role field
+      if (role && Array.isArray(role)) {
+        role = role[0]; // Take the first element if it's an array
+      }
+
+      // Validate role value if provided
+      if (role) {
+        const validRoles = [
+          "super",
+          "admin",
+          "Data entry",
+          "sales representative",
+        ];
+        if (!validRoles.includes(role)) {
+          return sendErrorResponse(
+            res,
+            "Invalid role. Must be one of: super, admin, Data entry, sales representative",
+            400
+          );
+        }
+      }
 
       const user = await users.findByPk(id);
       if (!user) {
@@ -228,6 +288,28 @@ class UsersController {
         if (existingUser) {
           return sendErrorResponse(res, "Email already taken", 400);
         }
+      }
+
+      // Handle profile image update
+      let finalProfileImageUrl = user.profile_image_url; // Keep existing if not updating
+
+      if (req.file) {
+        if (user.profile_image_url) {
+          const oldFilename = extractFilenameFromUrl(user.profile_image_url);
+          deleteProfileImage(oldFilename);
+        }
+        finalProfileImageUrl = generateFileUrl(req.file.filename);
+      } else if (profile_image_url !== undefined) {
+        // Profile image URL provided (could be null to remove)
+        if (
+          user.profile_image_url &&
+          profile_image_url !== user.profile_image_url
+        ) {
+          // Delete old profile image if changing to a different URL
+          const oldFilename = extractFilenameFromUrl(user.profile_image_url);
+          deleteProfileImage(oldFilename);
+        }
+        finalProfileImageUrl = profile_image_url;
       }
 
       // Update user
@@ -250,6 +332,7 @@ class UsersController {
         zip_code: zip_code !== undefined ? zip_code : user.zip_code,
         role: role || user.role,
         is_active: is_active !== undefined ? is_active : user.is_active,
+        profile_image_url: finalProfileImageUrl,
       });
 
       // Remove password from response

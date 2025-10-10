@@ -111,6 +111,12 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: false,
         comment: "Flag to indicate invoice is included in ROI calculation",
       },
+      is_sync_calculated: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        comment: "Flag to indicate invoice sync calculation status",
+      },
     },
     {
       timestamps: true, // Changed to true to enable Sequelize timestamps

@@ -11,6 +11,7 @@ const settingsRoutes = require("./settings");
 const alertsRoutes = require("./alerts");
 const dashboardRoutes = require("./dashboard");
 const reportsRoutes = require("./reports");
+const AuthMiddleware = require("../../middleware/auth.middleware");
 
 const router = express.Router();
 
@@ -18,39 +19,40 @@ router.get("/ping", async (req, res) => {
   res.send("pong");
 });
 
-//auth
+//auth - No token validation required
 router.use("/auth", authRoutes);
 
-//users
-router.use("/users", userRoutes);
+//users - Require token validation
+router.use("/users", AuthMiddleware.verifyToken, userRoutes);
 
-// routes
-router.use("/routes", routeRoutes);
+// routes - Require token validation
+router.use("/routes", AuthMiddleware.verifyToken, routeRoutes);
 
-//categories
-router.use("/categories", categoryRoutes);
+//categories - Require token validation
+router.use("/categories", AuthMiddleware.verifyToken, categoryRoutes);
 
-//customers
-router.use("/customers", customerRoutes);
+//customers - Require token validation
+router.use("/customers", AuthMiddleware.verifyToken, customerRoutes);
 
-//products
-router.use("/products", productRoutes);
+//products - Require token validation
+router.use("/products", AuthMiddleware.verifyToken, productRoutes);
 
-//invoices
-router.use("/invoices", invoiceRoutes);
+//invoices - Require token validation
+router.use("/invoices", AuthMiddleware.verifyToken, invoiceRoutes);
 
-//sync
-router.use("/sync", syncRoutes);
+//sync - Require token validation
+router.use("/sync", AuthMiddleware.verifyToken, syncRoutes);
 
-//settings
-router.use("/settings", settingsRoutes);
+//settings - Require token validation
+router.use("/settings", AuthMiddleware.verifyToken, settingsRoutes);
 
-//alerts
-router.use("/alerts", alertsRoutes);
+//alerts - Require token validation
+router.use("/alerts", AuthMiddleware.verifyToken, alertsRoutes);
 
-//dashboard
-router.use("/dashboard", dashboardRoutes);
+//dashboard - Require token validation
+router.use("/dashboard", AuthMiddleware.verifyToken, dashboardRoutes);
 
-router.use("/reports", reportsRoutes);
+//reports - Require token validation
+router.use("/reports", AuthMiddleware.verifyToken, reportsRoutes);
 
 module.exports = router;

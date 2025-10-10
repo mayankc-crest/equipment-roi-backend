@@ -20,8 +20,18 @@ router.post("/", alertsCtrl.createAlert);
  * @query {string} alert_type - Filter by alert type (optional)
  * @query {number} customer_id - Filter by customer ID (optional)
  * @query {string} search - Search in customer name/company (optional)
+ * @query {boolean} all - Get all alerts without pagination (optional, default: false)
+ * @query {boolean} is_read - Filter by read status (optional)
  */
 router.get("/", alertsCtrl.getAllAlerts);
+
+/**
+ * @description Mark all alerts as read
+ * @path /api/alerts/mark-all-read
+ * @method POST
+ * @body {boolean} read - Must be true to mark all alerts as read
+ */
+router.post("/mark-all-read", alertsCtrl.markAllAlertsAsRead);
 
 /**
  * @description Get alert by ID

@@ -1,4 +1,10 @@
-const { customers: Customers } = require("../models");
+const {
+  customers: Customers,
+  calc_roi: CalcRoi,
+  calc_roi_categories: CalcRoiCategories,
+  category_products: CategoryProducts,
+  products: Products,
+} = require("../models");
 const { sendSuccessRespose, sendErrorResponse } = require("../utils/response");
 const Sequelize = require("sequelize");
 
@@ -175,5 +181,91 @@ exports.getCustomerStats = async (req, res) => {
   } catch (error) {
     console.error("Get customer stats error:", error);
     return sendErrorResponse(res, "Failed to get customer statistics", 500);
+  }
+};
+
+exports.getCustomerROIProducts = async (req, res) => {
+  try {
+    const { customer_id } = req.params;
+
+    if (!customer_id) {
+      return sendErrorResponse(res, "Customer ID is required", 400);
+    }
+    const calcRoi = await CalcRoi.findOne({
+      where: { customer_id: customer_id },
+      attributes: ["id"],
+    });
+
+    if (!calcRoi) {
+      return sendErrorResponse(
+        res,
+        "No ROI calculation found for this customer",
+        404
+      );
+    }
+
+    const calcRoiCategories = await CalcRoiCategories.findAll({
+      where: { roi_id: calcRoi.id },
+      attributes: ["category_id"],
+    });
+
+    if (calcRoiCategories.length === 0) {
+      return sendSuccessRespose(
+        res,
+        {
+          products: [],
+          message: "No categories assigned to this customer's ROI",
+        },
+        "No products found for customer ROI",
+        200
+      );
+    }
+
+    const categoryIds = calcRoiCategories.map((cat) => cat.category_id);
+
+    const categoryProducts = await CategoryProducts.findAll({
+      where: { category_id: { [Sequelize.Op.in]: categoryIds } },
+      attributes: ["product_id"],
+    });
+
+    if (categoryProducts.length === 0) {
+      return sendSuccessRespose(
+        res,
+        { products: [], message: "No products found in assigned categories" },
+        "No products found for customer ROI",
+        200
+      );
+    }
+
+    const productIds = categoryProducts.map((cp) => cp.product_id);
+
+    const products = await Products.findAll({
+      where: { id: { [Sequelize.Op.in]: productIds } },
+      attributes: [
+        "id",
+        "name",
+        "full_name",
+        "description",
+        "price",
+        "is_active",
+        "account_name",
+      ],
+    });
+
+    return sendSuccessRespose(
+      res,
+      {
+        customer_id: customer_id,
+        roi_id: calcRoi.id,
+        category_ids: categoryIds,
+        product_count: products.length,
+        products: products,
+      },
+      "Customer ROI products retrieved successfully",
+      200
+    );
+  } catch (error) {
+    console.error("Get customer ROI products error:", error);
+    return sendErrorResponse(res, "Failed to get customer ROI products", 500);
   }
 };

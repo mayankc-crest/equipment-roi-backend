@@ -2,6 +2,8 @@ require("dotenv").config();
 const QuickBooksServer = require("./quickbook/server");
 const qbXMLHandler = require("./quickbook/qbXMLHandler");
 const { startThreeYearReviewCron } = require("./jobs/threeYearReviewCron");
+const quickBooksSyncCron = require("./jobs/quickbooksSyncCron");
+const AuthMiddleware = require("./middleware/auth.middleware");
 
 const express = require("express");
 const cors = require("cors");
@@ -12,10 +14,13 @@ const port = process.env.SERVER_PORT || 8000;
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
+// Serve static files for uploaded profile images
+app.use("/uploads", express.static("uploads"));
+
 app.use("/", indexRoutes);
 
 // Update the sync status endpoint
-app.get("/api/sync/status", async (req, res) => {
+app.get("/api/sync/status", AuthMiddleware.verifyToken, async (req, res) => {
   try {
     const qbXMLHandler = require("./quickbook/qbXMLHandler");
     const duplicates = await qbXMLHandler.checkForDuplicates();
@@ -57,111 +62,127 @@ app.get("/api/sync/status", async (req, res) => {
   }
 });
 // Reset pagination endpoint
-app.post("/api/sync/reset-pagination", (req, res) => {
-  try {
-    console.log("🔄 Resetting pagination state...");
-    const qbXMLHandler = require("./quickbook/qbXMLHandler");
-    qbXMLHandler.resetPagination();
+app.post(
+  "/api/sync/reset-pagination",
+  AuthMiddleware.verifyToken,
+  (req, res) => {
+    try {
+      console.log("🔄 Resetting pagination state...");
+      const qbXMLHandler = require("./quickbook/qbXMLHandler");
+      qbXMLHandler.resetPagination();
 
-    res.json({
-      success: true,
-      message: "Pagination state reset successfully",
-      data: {
-        pagination: qbXMLHandler.getPaginationStatus(),
-      },
-    });
-  } catch (error) {
-    console.error("❌ Error resetting pagination:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error resetting pagination",
-      error: error.message,
-    });
-  }
-});
-
-// Check for duplicate items
-app.get("/api/sync/check-duplicates", async (req, res) => {
-  try {
-    console.log("🔍 Checking for duplicate items...");
-    const qbXMLHandler = require("./quickbook/qbXMLHandler");
-    const duplicates = await qbXMLHandler.checkForDuplicates();
-
-    res.json({
-      success: true,
-      message: "Duplicate check completed",
-      data: duplicates,
-    });
-  } catch (error) {
-    console.error("❌ Error checking duplicates:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error checking duplicates",
-      error: error.message,
-    });
-  }
-});
-
-// Clean up duplicate items
-app.post("/api/sync/cleanup-duplicates", async (req, res) => {
-  try {
-    console.log("🧹 Cleaning up duplicate items...");
-    const qbXMLHandler = require("./quickbook/qbXMLHandler");
-    const cleanupResult = await qbXMLHandler.cleanupDuplicates();
-
-    res.json({
-      success: true,
-      message: "Duplicate cleanup completed",
-      data: cleanupResult,
-    });
-  } catch (error) {
-    console.error("❌ Error cleaning up duplicates:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error cleaning up duplicates",
-      error: error.message,
-    });
-  }
-});
-
-// Force next batch of items
-app.post("/api/sync/next-batch", async (req, res) => {
-  try {
-    console.log("🔄 Forcing next batch of items...");
-    const qbXMLHandler = require("./quickbook/qbXMLHandler");
-
-    if (qbXMLHandler.hasMoreItems()) {
-      // This will trigger the next batch in the next sync cycle
       res.json({
         success: true,
-        message: "Next batch will be fetched in next sync cycle",
+        message: "Pagination state reset successfully",
         data: {
-          hasMoreItems: true,
           pagination: qbXMLHandler.getPaginationStatus(),
         },
       });
-    } else {
-      res.json({
-        success: true,
-        message: "No more items to fetch - pagination complete",
-        data: {
-          hasMoreItems: false,
-          pagination: qbXMLHandler.getPaginationStatus(),
-        },
+    } catch (error) {
+      console.error("❌ Error resetting pagination:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error resetting pagination",
+        error: error.message,
       });
     }
-  } catch (error) {
-    console.error("❌ Error forcing next batch:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error forcing next batch",
-      error: error.message,
-    });
   }
-});
+);
+
+// Check for duplicate items
+app.get(
+  "/api/sync/check-duplicates",
+  AuthMiddleware.verifyToken,
+  async (req, res) => {
+    try {
+      console.log("🔍 Checking for duplicate items...");
+      const qbXMLHandler = require("./quickbook/qbXMLHandler");
+      const duplicates = await qbXMLHandler.checkForDuplicates();
+
+      res.json({
+        success: true,
+        message: "Duplicate check completed",
+        data: duplicates,
+      });
+    } catch (error) {
+      console.error("❌ Error checking duplicates:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error checking duplicates",
+        error: error.message,
+      });
+    }
+  }
+);
+
+// Clean up duplicate items
+app.post(
+  "/api/sync/cleanup-duplicates",
+  AuthMiddleware.verifyToken,
+  async (req, res) => {
+    try {
+      console.log("🧹 Cleaning up duplicate items...");
+      const qbXMLHandler = require("./quickbook/qbXMLHandler");
+      const cleanupResult = await qbXMLHandler.cleanupDuplicates();
+
+      res.json({
+        success: true,
+        message: "Duplicate cleanup completed",
+        data: cleanupResult,
+      });
+    } catch (error) {
+      console.error("❌ Error cleaning up duplicates:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error cleaning up duplicates",
+        error: error.message,
+      });
+    }
+  }
+);
+
+// Force next batch of items
+app.post(
+  "/api/sync/next-batch",
+  AuthMiddleware.verifyToken,
+  async (req, res) => {
+    try {
+      console.log("🔄 Forcing next batch of items...");
+      const qbXMLHandler = require("./quickbook/qbXMLHandler");
+
+      if (qbXMLHandler.hasMoreItems()) {
+        // This will trigger the next batch in the next sync cycle
+        res.json({
+          success: true,
+          message: "Next batch will be fetched in next sync cycle",
+          data: {
+            hasMoreItems: true,
+            pagination: qbXMLHandler.getPaginationStatus(),
+          },
+        });
+      } else {
+        res.json({
+          success: true,
+          message: "No more items to fetch - pagination complete",
+          data: {
+            hasMoreItems: false,
+            pagination: qbXMLHandler.getPaginationStatus(),
+          },
+        });
+      }
+    } catch (error) {
+      console.error("❌ Error forcing next batch:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error forcing next batch",
+        error: error.message,
+      });
+    }
+  }
+);
 
 // Get sync progress
-app.get("/api/sync/progress", async (req, res) => {
+app.get("/api/sync/progress", AuthMiddleware.verifyToken, async (req, res) => {
   try {
     console.log("📊 Getting sync progress...");
     const qbXMLHandler = require("./quickbook/qbXMLHandler");
@@ -183,29 +204,33 @@ app.get("/api/sync/progress", async (req, res) => {
 });
 
 // Get detailed sync statistics
-app.get("/api/sync/statistics", async (req, res) => {
-  try {
-    console.log("📊 Getting detailed sync statistics...");
-    const qbXMLHandler = require("./quickbook/qbXMLHandler");
-    const statistics = qbXMLHandler.getSyncStatistics();
+app.get(
+  "/api/sync/statistics",
+  AuthMiddleware.verifyToken,
+  async (req, res) => {
+    try {
+      console.log("📊 Getting detailed sync statistics...");
+      const qbXMLHandler = require("./quickbook/qbXMLHandler");
+      const statistics = qbXMLHandler.getSyncStatistics();
 
-    res.json({
-      success: true,
-      message: "Sync statistics retrieved successfully",
-      data: statistics,
-    });
-  } catch (error) {
-    console.error("❌ Error getting sync statistics:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error getting sync statistics",
-      error: error.message,
-    });
+      res.json({
+        success: true,
+        message: "Sync statistics retrieved successfully",
+        data: statistics,
+      });
+    } catch (error) {
+      console.error("❌ Error getting sync statistics:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error getting sync statistics",
+        error: error.message,
+      });
+    }
   }
-});
+);
 
 // Get numbered log files
-app.get("/api/sync/logs", async (req, res) => {
+app.get("/api/sync/logs", AuthMiddleware.verifyToken, async (req, res) => {
   try {
     console.log("📁 Getting numbered log files...");
     const qbXMLHandler = require("./quickbook/qbXMLHandler");
@@ -227,7 +252,7 @@ app.get("/api/sync/logs", async (req, res) => {
 });
 
 // Reset sync counter
-app.post("/api/sync/reset-counter", (req, res) => {
+app.post("/api/sync/reset-counter", AuthMiddleware.verifyToken, (req, res) => {
   try {
     console.log("🔄 Resetting sync counter...");
     const qbXMLHandler = require("./quickbook/qbXMLHandler");
@@ -252,32 +277,36 @@ app.post("/api/sync/reset-counter", (req, res) => {
 });
 
 // Switch pagination strategy
-app.post("/api/sync/switch-strategy", async (req, res) => {
-  try {
-    console.log("🔄 Switching pagination strategy...");
-    const qbXMLHandler = require("./quickbook/qbXMLHandler");
-    qbXMLHandler.switchPaginationStrategy();
+app.post(
+  "/api/sync/switch-strategy",
+  AuthMiddleware.verifyToken,
+  async (req, res) => {
+    try {
+      console.log("🔄 Switching pagination strategy...");
+      const qbXMLHandler = require("./quickbook/qbXMLHandler");
+      qbXMLHandler.switchPaginationStrategy();
 
-    res.json({
-      success: true,
-      message: "Pagination strategy switched successfully",
-      data: {
-        newStrategy: qbXMLHandler.itemPagination.paginationStrategy,
-        pagination: qbXMLHandler.getPaginationStatus(),
-      },
-    });
-  } catch (error) {
-    console.error("❌ Error switching pagination strategy:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error switching pagination strategy",
-      error: error.message,
-    });
+      res.json({
+        success: true,
+        message: "Pagination strategy switched successfully",
+        data: {
+          newStrategy: qbXMLHandler.itemPagination.paginationStrategy,
+          pagination: qbXMLHandler.getPaginationStatus(),
+        },
+      });
+    } catch (error) {
+      console.error("❌ Error switching pagination strategy:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error switching pagination strategy",
+        error: error.message,
+      });
+    }
   }
-});
+);
 
 // Manual ITEM sync triggered via API
-app.post("/api/sync/now", async (req, res) => {
+app.post("/api/sync/now", AuthMiddleware.verifyToken, async (req, res) => {
   try {
     console.log("🔧 Manual ITEM sync triggered via API");
 
@@ -355,42 +384,46 @@ app.post("/api/sync/now", async (req, res) => {
 });
 
 // Comprehensive ITEM sync with improved pagination
-app.post("/api/sync/comprehensive", async (req, res) => {
-  try {
-    console.log("🚀 Comprehensive ITEM sync triggered via API");
+app.post(
+  "/api/sync/comprehensive",
+  AuthMiddleware.verifyToken,
+  async (req, res) => {
+    try {
+      console.log("🚀 Comprehensive ITEM sync triggered via API");
 
-    // Import the QBXMLHandler
-    const qbXMLHandler = require("./quickbook/qbXMLHandler");
+      // Import the QBXMLHandler
+      const qbXMLHandler = require("./quickbook/qbXMLHandler");
 
-    // Start comprehensive sync
-    const result = await qbXMLHandler.syncAllItemsComprehensive();
+      // Start comprehensive sync
+      const result = await qbXMLHandler.syncAllItemsComprehensive();
 
-    global.lastSyncTime = new Date().toISOString();
+      global.lastSyncTime = new Date().toISOString();
 
-    res.json({
-      success: true,
-      message: "Comprehensive ITEM sync completed successfully",
-      data: {
-        syncTime: global.lastSyncTime,
-        syncType: "Comprehensive Items Sync",
-        itemsProcessed: result ? result.length : 0,
-        pagination: qbXMLHandler.getPaginationStatus(),
-        strategy: qbXMLHandler.itemPagination.paginationStrategy,
-      },
-    });
-  } catch (error) {
-    console.error("❌ Error in comprehensive ITEM sync:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error during comprehensive ITEM sync",
-      error: error.message,
-    });
+      res.json({
+        success: true,
+        message: "Comprehensive ITEM sync completed successfully",
+        data: {
+          syncTime: global.lastSyncTime,
+          syncType: "Comprehensive Items Sync",
+          itemsProcessed: result ? result.length : 0,
+          pagination: qbXMLHandler.getPaginationStatus(),
+          strategy: qbXMLHandler.itemPagination.paginationStrategy,
+        },
+      });
+    } catch (error) {
+      console.error("❌ Error in comprehensive ITEM sync:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error during comprehensive ITEM sync",
+        error: error.message,
+      });
+    }
   }
-});
+);
 
 // Batch processing endpoints
 // Get batch processing status
-app.get("/api/batch/status", async (req, res) => {
+app.get("/api/batch/status", AuthMiddleware.verifyToken, async (req, res) => {
   try {
     console.log("📊 Getting batch processing status...");
     const qbXMLHandler = require("./quickbook/qbXMLHandler");
@@ -412,7 +445,7 @@ app.get("/api/batch/status", async (req, res) => {
 });
 
 // Start batch processing from parsed data files
-app.post("/api/batch/start", async (req, res) => {
+app.post("/api/batch/start", AuthMiddleware.verifyToken, async (req, res) => {
   try {
     const { batchSize = 100, sourceFile = null } = req.body;
 
@@ -461,54 +494,58 @@ app.post("/api/batch/start", async (req, res) => {
 });
 
 // Process specific parsed data file
-app.post("/api/batch/process-file", async (req, res) => {
-  try {
-    const { filename, batchSize = 100 } = req.body;
+app.post(
+  "/api/batch/process-file",
+  AuthMiddleware.verifyToken,
+  async (req, res) => {
+    try {
+      const { filename, batchSize = 100 } = req.body;
 
-    if (!filename) {
-      return res.status(400).json({
+      if (!filename) {
+        return res.status(400).json({
+          success: false,
+          message: "Filename is required",
+          data: { required: "filename" },
+        });
+      }
+
+      console.log(
+        `📄 Processing specific file: ${filename} with batch size: ${batchSize}`
+      );
+
+      const qbXMLHandler = require("./quickbook/qbXMLHandler");
+
+      // Process specific file
+      const result = await qbXMLHandler.processProductsFromParsedFiles(
+        batchSize,
+        filename
+      );
+
+      global.lastBatchTime = new Date().toISOString();
+
+      res.json({
+        success: true,
+        message: `File ${filename} processed successfully`,
+        data: {
+          batchTime: global.lastBatchTime,
+          filename: filename,
+          batchSize: batchSize,
+          result: result,
+        },
+      });
+    } catch (error) {
+      console.error("❌ Error processing specific file:", error);
+      res.status(500).json({
         success: false,
-        message: "Filename is required",
-        data: { required: "filename" },
+        message: "Error processing specific file",
+        error: error.message,
       });
     }
-
-    console.log(
-      `📄 Processing specific file: ${filename} with batch size: ${batchSize}`
-    );
-
-    const qbXMLHandler = require("./quickbook/qbXMLHandler");
-
-    // Process specific file
-    const result = await qbXMLHandler.processProductsFromParsedFiles(
-      batchSize,
-      filename
-    );
-
-    global.lastBatchTime = new Date().toISOString();
-
-    res.json({
-      success: true,
-      message: `File ${filename} processed successfully`,
-      data: {
-        batchTime: global.lastBatchTime,
-        filename: filename,
-        batchSize: batchSize,
-        result: result,
-      },
-    });
-  } catch (error) {
-    console.error("❌ Error processing specific file:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error processing specific file",
-      error: error.message,
-    });
   }
-});
+);
 
 // Get list of available parsed data files
-app.get("/api/batch/files", async (req, res) => {
+app.get("/api/batch/files", AuthMiddleware.verifyToken, async (req, res) => {
   try {
     console.log("📁 Getting list of parsed data files...");
     const qbXMLHandler = require("./quickbook/qbXMLHandler");
@@ -578,6 +615,10 @@ const server = app.listen(port, () => {
     // Start the 3-year review cron job
     console.log("🕐 Starting 3-year review cron job...");
     startThreeYearReviewCron();
+
+    // Start QuickBooks sync cron jobs
+    // console.log("🔄 Starting QuickBooks sync cron jobs...");
+    // quickBooksSyncCron.startSyncCronJobs();
   } catch (error) {
     console.log("❌ Error connecting to server:", error);
   }

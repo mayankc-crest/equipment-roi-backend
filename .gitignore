@@ -7,7 +7,7 @@
 node_modules/
 dist/
 Images/
-upload/
+uploads/
 reports/
 permission.json
 config/service.json

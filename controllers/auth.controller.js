@@ -94,18 +94,18 @@ class AuthController {
       // Find user by email
       const user = await users.findOne({ where: { email } });
       if (!user) {
-        return sendErrorResponse(res, "Invalid credentials", 401);
+        return sendErrorResponse(res, "Invalid credentials", 404);
       }
 
       // Check if user is active
       if (!user.is_active) {
-        return sendErrorResponse(res, "Account is deactivated", 401);
+        return sendErrorResponse(res, "Account is deactivated", 404);
       }
 
       // Verify password
       const isValidPassword = await bcrypt.compare(password, user.password);
       if (!isValidPassword) {
-        return sendErrorResponse(res, "Invalid credentials", 401);
+        return sendErrorResponse(res, "Invalid credentials", 404);
       }
 
       // Update last login
