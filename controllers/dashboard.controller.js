@@ -91,19 +91,29 @@ exports.getDashboardOverview = async (req, res) => {
 
     // Calculate percentage changes
     let salesPercentageChange;
-    salesPercentageChange =
-      previous6MonthsSales > 0
-        ? ((current6MonthsSales - previous6MonthsSales) /
-            previous6MonthsSales) *
-          100
-        : 100;
+    const currentSalesValue = current6MonthsSales || 0;
+    const previousSalesValue = previous6MonthsSales || 0;
+    if (previousSalesValue > 0) {
+      salesPercentageChange =
+        ((currentSalesValue - previousSalesValue) / previousSalesValue) * 100;
+    } else {
+      // If there were no previous sales:
+      // - return 100% when there are current sales
+      // - return 0% when there are no current sales either (first-time user with no sales yet)
+      salesPercentageChange = currentSalesValue > 0 ? 100 : 0;
+    }
 
-    const recoupedPercentageChange =
-      previous6MonthsRecouped > 0
-        ? ((current6MonthsRecouped - previous6MonthsRecouped) /
-            previous6MonthsRecouped) *
-          100
-        : 100;
+    let recoupedPercentageChange;
+    const currentRecoupedValue = current6MonthsRecouped || 0;
+    const previousRecoupedValue = previous6MonthsRecouped || 0;
+    if (previousRecoupedValue > 0) {
+      recoupedPercentageChange =
+        ((currentRecoupedValue - previousRecoupedValue) /
+          previousRecoupedValue) *
+        100;
+    } else {
+      recoupedPercentageChange = currentRecoupedValue > 0 ? 100 : 0;
+    }
 
     // Calculate deficit amounts (total_sales - total_recouped)
     const current6MonthsDeficit =
@@ -111,15 +121,18 @@ exports.getDashboardOverview = async (req, res) => {
     const previous6MonthsDeficit =
       (previous6MonthsSales || 0) - (previous6MonthsRecouped || 0);
     console.log("previous6MonthsDeficit is here::: ", previous6MonthsDeficit);
-    // Calculate deficit percentage change
-    const deficitPercentageChange =
-      previous6MonthsDeficit !== 0
-        ? ((current6MonthsDeficit - previous6MonthsDeficit) /
-            Math.abs(previous6MonthsDeficit)) *
-          100
-        : previous6MonthsDeficit === 0
-        ? 100
-        : 0;
+    // Calculate deficit percentage change with the same edge-case handling
+    let deficitPercentageChange;
+    const currentDeficitValue = current6MonthsDeficit || 0;
+    const previousDeficitValue = previous6MonthsDeficit || 0;
+    if (Math.abs(previousDeficitValue) > 0) {
+      deficitPercentageChange =
+        ((currentDeficitValue - previousDeficitValue) /
+          Math.abs(previousDeficitValue)) *
+        100;
+    } else {
+      deficitPercentageChange = Math.abs(currentDeficitValue) > 0 ? 100 : 0;
+    }
 
     const response = {
       totalCustomers: {

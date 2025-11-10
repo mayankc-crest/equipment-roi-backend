@@ -20,6 +20,11 @@ class AuthMiddleware {
       try {
         const decoded = jwt.verify(token, JWT_SECRET);
 
+        // Expose token claims to downstream handlers
+        req.auth = decoded;
+        req.userId = decoded.id;
+        req.userRole = decoded.role;
+
         // Find user in database
         const user = await users.findByPk(decoded.id, {
           attributes: { exclude: ["password"] },
@@ -115,6 +120,7 @@ class AuthMiddleware {
       try {
         const decoded = jwt.verify(token, JWT_SECRET);
 
+        req.auth = decoded; // Expose claims even in optional auth
         users
           .findByPk(decoded.id, {
             attributes: { exclude: ["password"] },
