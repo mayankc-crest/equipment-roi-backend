@@ -120,7 +120,7 @@ exports.getDashboardOverview = async (req, res) => {
       (current6MonthsSales || 0) - (current6MonthsRecouped || 0);
     const previous6MonthsDeficit =
       (previous6MonthsSales || 0) - (previous6MonthsRecouped || 0);
-    console.log("previous6MonthsDeficit is here::: ", previous6MonthsDeficit);
+    
     // Calculate deficit percentage change with the same edge-case handling
     let deficitPercentageChange;
     const currentDeficitValue = current6MonthsDeficit || 0;
@@ -549,17 +549,36 @@ exports.getInvestmentRecoupedAnalytics = async (req, res) => {
     }
 
     // Get monthly data grouped by month
-    const monthlyData = await LogsCalcRoi.findAll({
-      attributes: [
-        [Sequelize.fn("MONTH", Sequelize.col("created_at")), "month"],
-        [Sequelize.fn("SUM", Sequelize.col("total_sales")), "totalInvestment"],
-        [Sequelize.fn("SUM", Sequelize.col("total_recouped")), "totalRecouped"],
-      ],
-      where: whereClause,
-      group: [Sequelize.fn("MONTH", Sequelize.col("created_at"))],
-      order: [[Sequelize.fn("MONTH", Sequelize.col("created_at")), "ASC"]],
-    });
-
+    // Build where conditions for raw query
+    let whereConditions = [];
+    let replacements = {};
+    
+    if (year) {
+      whereConditions.push("YEAR(logs_calc_roi.created_at) = :year");
+      replacements.year = parseInt(year);
+    }
+    
+    if (customer_id) {
+      whereConditions.push("logs_calc_roi.calc_roi_id IN (SELECT id FROM calc_roi WHERE customer_id = :customer_id)");
+      replacements.customer_id = parseInt(customer_id);
+    }
+    
+    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
+    
+    const monthlyData = await LogsCalcRoi.sequelize.query(
+      `SELECT 
+        MONTH(logs_calc_roi.created_at) as month,
+        SUM(logs_calc_roi.total_sales) as totalInvestment,
+        SUM(logs_calc_roi.total_recouped) as totalRecouped
+      FROM logs_calc_roi
+      ${whereSql}
+      GROUP BY MONTH(logs_calc_roi.created_at)
+      ORDER BY MONTH(logs_calc_roi.created_at) ASC`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: replacements
+      }
+    );
     // Create array for all 12 months with default values
     const months = [
       "Jan",
@@ -576,27 +595,27 @@ exports.getInvestmentRecoupedAnalytics = async (req, res) => {
       "Dec",
     ];
 
-    const monthlyChartData = months.map((monthName, index) => {
+    const monthlyChartData = months?.map((monthName, index) => {
       const monthNumber = index + 1;
       const monthData = monthlyData.find(
-        (item) => item.dataValues.month === monthNumber
+        (item) => item.month === monthNumber
       );
 
       return {
         month: monthName,
-        investment: parseFloat(monthData?.dataValues?.totalInvestment || 0),
-        recouped: parseFloat(monthData?.dataValues?.totalRecouped || 0),
+        investment: parseFloat(monthData?.totalInvestment || 0),
+        recouped: parseFloat(monthData?.totalRecouped || 0),
       };
     });
 
     // Calculate totals for the selected period
     const totalInvestment = monthlyData.reduce(
-      (sum, item) => sum + parseFloat(item.dataValues.totalInvestment || 0),
+      (sum, item) => sum + parseFloat(item.totalInvestment || 0),
       0
     );
 
     const totalRecouped = monthlyData.reduce(
-      (sum, item) => sum + parseFloat(item.dataValues.totalRecouped || 0),
+      (sum, item) => sum + parseFloat(item.totalRecouped || 0),
       0
     );
 
@@ -640,87 +659,59 @@ exports.getCustomersTotalSalesAnalytics = async (req, res) => {
       page = 1,
       limit = 20,
     } = req.query;
-
-    console.log("start_date:::", start_date, "end_date::", end_date);
-    // Build where clause for filters
-    let whereClause = {};
-
+    
+    // Build where conditions for raw query
+    let whereConditions = [];
+    let replacements = {};
+    
     // Year filter
     if (year) {
-      whereClause[Sequelize.Op.and] = [
-        Sequelize.where(
-          Sequelize.fn("YEAR", Sequelize.col("created_at")),
-          year
-        ),
-      ];
+      whereConditions.push("YEAR(logs_calc_roi.created_at) = :year");
+      replacements.year = parseInt(year);
     }
-
+    
     // Date range filter
     if (start_date && end_date) {
       try {
         const { startDate, endDate } = parseDateRange(start_date, end_date);
-
-        const dateFilter = {
-          created_at: {
-            [Sequelize.Op.between]: [startDate, endDate],
-          },
-        };
-
-        if (whereClause[Sequelize.Op.and]) {
-          whereClause[Sequelize.Op.and].push(dateFilter);
-        } else {
-          whereClause[Sequelize.Op.and] = [dateFilter];
-        }
+        whereConditions.push("logs_calc_roi.created_at BETWEEN :startDate AND :endDate");
+        replacements.startDate = startDate;
+        replacements.endDate = endDate;
       } catch (error) {
         return sendErrorResponse(res, error.message, 400);
       }
     }
-
+    
     // Customer filter
     if (customer_id) {
-      whereClause.calc_roi_id = {
-        [Sequelize.Op.in]: Sequelize.literal(`(
-          SELECT id FROM calc_roi WHERE customer_id = ${customer_id}
-        )`),
-      };
+      whereConditions.push("logs_calc_roi.calc_roi_id IN (SELECT id FROM calc_roi WHERE customer_id = :customer_id)");
+      replacements.customer_id = parseInt(customer_id);
     }
-
+    
+    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
+    
     // Calculate offset for pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
-
-    // Get customer sales data with pagination using raw query approach
-    console.log("this is the query here dak:::");
-    const customerSalesData = await LogsCalcRoi.findAll({
-      attributes: [
-        "calc_roi_id",
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.total_sales")),
-          "total_sales",
-        ],
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.total_months")),
-          "total_months",
-        ],
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.sales_not_met")),
-          "sales_not_met",
-        ],
-        [
-          Sequelize.fn("COUNT", Sequelize.col("logs_calc_roi.id")),
-          "calculation_count",
-        ],
-      ],
-      where: whereClause,
-      group: ["calc_roi_id"],
-      order: [
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.total_sales")),
-          "DESC",
-        ],
-      ],
-      limit: parseInt(limit),
-      offset: offset,
-    });
+    const limitValue = parseInt(limit);
+    
+    // Get customer sales data with pagination using raw query
+    const customerSalesData = await LogsCalcRoi.sequelize.query(
+      `SELECT 
+        logs_calc_roi.calc_roi_id,
+        SUM(logs_calc_roi.total_sales) as total_sales,
+        SUM(logs_calc_roi.total_months) as total_months,
+        SUM(logs_calc_roi.sales_not_met) as sales_not_met,
+        COUNT(logs_calc_roi.id) as calculation_count
+      FROM logs_calc_roi
+      ${whereSql}
+      GROUP BY logs_calc_roi.calc_roi_id
+      ORDER BY SUM(logs_calc_roi.total_sales) DESC
+      LIMIT :limitValue OFFSET :offset`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: { ...replacements, limitValue, offset }
+      }
+    );
 
     // Get customer data separately for each calc_roi_id
     const calcRoiIds = customerSalesData.map((item) => item.calc_roi_id);
@@ -745,13 +736,17 @@ exports.getCustomersTotalSalesAnalytics = async (req, res) => {
       calcRoiMap[roi.id] = roi;
     });
 
-    // Get total count for pagination
-    const totalCount = await LogsCalcRoi.count({
-      where: whereClause,
-      group: ["calc_roi_id"],
-      distinct: true,
-      col: "calc_roi_id",
-    });
+    // Get total count for pagination using raw query
+    const totalCountResult = await LogsCalcRoi.sequelize.query(
+      `SELECT COUNT(DISTINCT logs_calc_roi.calc_roi_id) as total
+      FROM logs_calc_roi
+      ${whereSql}`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: replacements
+      }
+    );
+    const totalCount = totalCountResult[0]?.total || 0;
 
     const formattedData = customerSalesData.map((item) => {
       const calcRoi = calcRoiMap[item.calc_roi_id];
@@ -763,10 +758,10 @@ exports.getCustomersTotalSalesAnalytics = async (req, res) => {
           ? `${customer.first_name} ${customer.last_name}`
           : "Unknown",
         company_name: customer?.company_name || "",
-        total_sales: parseFloat(item.dataValues.total_sales || 0),
-        total_months: parseInt(item.dataValues.total_months || 0),
-        sales_not_met: parseInt(item.dataValues.sales_not_met || 0),
-        calculation_count: parseInt(item.dataValues.calculation_count || 0),
+        total_sales: parseFloat(item.total_sales || 0),
+        total_months: parseInt(item.total_months || 0),
+        sales_not_met: parseInt(item.sales_not_met || 0),
+        calculation_count: parseInt(item.calculation_count || 0),
       };
     });
 
@@ -775,13 +770,8 @@ exports.getCustomersTotalSalesAnalytics = async (req, res) => {
       pagination: {
         current_page: parseInt(page),
         per_page: parseInt(limit),
-        total_records: Array.isArray(totalCount)
-          ? totalCount.length
-          : totalCount,
-        total_pages: Math.ceil(
-          (Array.isArray(totalCount) ? totalCount.length : totalCount) /
-            parseInt(limit)
-        ),
+        total_records: totalCount,
+        total_pages: Math.ceil(totalCount / parseInt(limit)),
       },
       filters: {
         year: year || null,
@@ -812,47 +802,44 @@ exports.getMonthlyCustomersSalesAnalytics = async (req, res) => {
   try {
     const { year, customer_id, page = 1, limit = 20 } = req.query;
 
-    // Build where clause for filters
-    let whereClause = {};
-
+    // Build where conditions for raw query
+    let whereConditions = [];
+    let replacements = {};
+    
     // Year filter
     if (year) {
-      whereClause[Sequelize.Op.and] = [
-        Sequelize.where(
-          Sequelize.fn("YEAR", Sequelize.col("created_at")),
-          year
-        ),
-      ];
+      whereConditions.push("YEAR(logs_calc_roi.created_at) = :year");
+      replacements.year = parseInt(year);
     }
-
+    
     // Customer filter
     if (customer_id) {
-      whereClause.calc_roi_id = {
-        [Sequelize.Op.in]: Sequelize.literal(`(
-          SELECT id FROM calc_roi WHERE customer_id = ${customer_id}
-        )`),
-      };
+      whereConditions.push("logs_calc_roi.calc_roi_id IN (SELECT id FROM calc_roi WHERE customer_id = :customer_id)");
+      replacements.customer_id = parseInt(customer_id);
     }
-
+    
+    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
+    
     // Calculate offset for pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
-
-    // Get monthly sales data grouped by month
-    const monthlySalesData = await LogsCalcRoi.findAll({
-      attributes: [
-        [Sequelize.fn("MONTH", Sequelize.col("created_at")), "month"],
-        [Sequelize.fn("SUM", Sequelize.col("total_sales")), "total_sales"],
-        [
-          Sequelize.fn("AVG", Sequelize.col("monthly_sales_required")),
-          "min_sales",
-        ],
-      ],
-      where: whereClause,
-      group: [Sequelize.fn("MONTH", Sequelize.col("created_at"))],
-      order: [[Sequelize.fn("MONTH", Sequelize.col("created_at")), "ASC"]],
-      limit: parseInt(limit),
-      offset: offset,
-    });
+    const limitValue = parseInt(limit);
+    
+    // Get monthly sales data grouped by month using raw query
+    const monthlySalesData = await LogsCalcRoi.sequelize.query(
+      `SELECT 
+        MONTH(logs_calc_roi.created_at) as month,
+        SUM(logs_calc_roi.total_sales) as total_sales,
+        AVG(logs_calc_roi.monthly_sales_required) as min_sales
+      FROM logs_calc_roi
+      ${whereSql}
+      GROUP BY MONTH(logs_calc_roi.created_at)
+      ORDER BY MONTH(logs_calc_roi.created_at) ASC
+      LIMIT :limitValue OFFSET :offset`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: { ...replacements, limitValue, offset }
+      }
+    );
 
     // Create array for all 12 months with default values
     const months = [
@@ -873,11 +860,11 @@ exports.getMonthlyCustomersSalesAnalytics = async (req, res) => {
     const monthlyChartData = months.map((monthName, index) => {
       const monthNumber = index + 1;
       const monthData = monthlySalesData.find(
-        (item) => item.dataValues.month === monthNumber
+        (item) => item.month === monthNumber
       );
 
-      const sales = parseFloat(monthData?.dataValues?.total_sales || 0);
-      const minSales = parseFloat(monthData?.dataValues?.min_sales || 0);
+      const sales = parseFloat(monthData?.total_sales || 0);
+      const minSales = parseFloat(monthData?.min_sales || 0);
       const deficit = sales < minSales ? minSales - sales : 0;
 
       return {
@@ -888,23 +875,16 @@ exports.getMonthlyCustomersSalesAnalytics = async (req, res) => {
       };
     });
 
-    // Get total count for pagination - count distinct months
-    const totalCountResult = await LogsCalcRoi.findAll({
-      attributes: [
-        [
-          Sequelize.fn(
-            "COUNT",
-            Sequelize.fn(
-              "DISTINCT",
-              Sequelize.fn("MONTH", Sequelize.col("created_at"))
-            )
-          ),
-          "count",
-        ],
-      ],
-      where: whereClause,
-      raw: true,
-    });
+    // Get total count for pagination - count distinct months using raw query
+    const totalCountResult = await LogsCalcRoi.sequelize.query(
+      `SELECT COUNT(DISTINCT MONTH(logs_calc_roi.created_at)) as count
+      FROM logs_calc_roi
+      ${whereSql}`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: replacements
+      }
+    );
 
     const totalCount = totalCountResult[0]?.count || 0;
 

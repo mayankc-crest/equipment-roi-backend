@@ -357,15 +357,10 @@ class SyncController {
       // Generate sync requests for the specific year
       await generateYearBasedSyncRequests(startDate, endDate);
 
-      // Get the request queue to see what was generated
-      const requests = [];
-      await qbXMLHandler.fetchRequests((err, requestArray) => {
-        if (err) {
-          console.error("Error generating year-based requests:", err);
-          return;
-        }
-        requests.push(...requestArray);
-      });
+      // Get the request count WITHOUT clearing the queue
+      // The queue will be cleared by QuickBooks Web Connector when it fetches requests
+      const requestCount = qbXMLHandler.requestQueue.length;
+      console.log(`📊 Generated ${requestCount} requests in queue`);
 
       // Mark year as completed after successful request generation
       if (isManagedYear) {
@@ -379,7 +374,7 @@ class SyncController {
           year: year,
           startDate: startDate,
           endDate: endDate,
-          requestCount: requests.length,
+          requestCount: requestCount,
           year_status: isManagedYear ? "completed" : "not_managed",
           note: "QuickBooks Web Connector needs to be running to process the requests",
         },

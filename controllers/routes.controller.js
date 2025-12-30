@@ -26,6 +26,7 @@ exports.getRoutes = async (req, res) => {
       search,
       sortBy = "route_name",
       sortOrder = "ASC",
+      status,
     } = req.query;
 
     // Check if all routes are requested
@@ -43,6 +44,7 @@ exports.getRoutes = async (req, res) => {
         { route_description: { [Sequelize.Op.like]: `%${search}%` } },
       ];
     }
+    if (status) whereClause.status = status;
 
     // Build order clause
     const orderClause = [[sortBy, sortOrder.toUpperCase()]];
@@ -58,6 +60,7 @@ exports.getRoutes = async (req, res) => {
               "route_number",
               "route_name",
               "route_description",
+              "status",
               "createdAt",
               "updatedAt",
             ],
@@ -96,6 +99,7 @@ exports.getRoutes = async (req, res) => {
           "id",
           "route_number",
           "route_name",
+          "status",
           "route_description",
           "createdAt",
           "updatedAt",
@@ -156,13 +160,14 @@ exports.getRouteById = async (req, res) => {
 
 exports.updateRoute = async (req, res) => {
   try {
-    const { route_number, route_name, route_description } = req.body;
+    const { route_number, route_name, route_description,status } = req.body;
     console.log("the id is here:::", req.params.id);
     const route = await Routes.update(
       {
         route_number,
         route_name,
         route_description,
+        status,
       },
       {
         where: { id: req.params.id },

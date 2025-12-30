@@ -1180,3 +1180,120 @@ exports.getCalcInvoiceDetails = async (req, res) => {
     );
   }
 };
+
+// Get month-wise sales data for a calc_roi
+exports.getMonthWiseSales = async (req, res) => {
+  try {
+    console.log("Invoice new api got called::::", req.query)
+    const { calc_roi_id } = req.query;
+   
+    if (!calc_roi_id) {
+      return sendErrorResponse(res, "calc_roi_id is required", 400);
+    }
+
+    // Get start_date from calc_roi table
+    const calcRoi = await CalcRoi.findByPk(calc_roi_id, {
+      attributes: ["id", "start_date"],
+    });
+
+    if (!calcRoi) {
+      return sendErrorResponse(res, "Calc ROI not found", 404);
+    }
+
+    if (!calcRoi.start_date) {
+      return sendErrorResponse(
+        res,
+        "Start date not found for this Calc ROI",
+        404
+      );
+    }
+
+    // Get all calc_invoices for this calc_roi_id
+    const allCalcInvoices = await CalcInvoices.findAll({
+      where: {
+        roi_id: calc_roi_id,
+      },
+      attributes: ["id", "installation_date", "total_amount"],
+    });
+
+    // Filter out invoices with zero or null amounts
+    const validInvoices = allCalcInvoices.filter(
+      (invoice) => invoice.total_amount && parseFloat(invoice.total_amount) > 0
+    );
+
+    // Group invoices by installation_date (for those with dates)
+    const invoicesByDate = {};
+    const invoicesWithoutDate = [];
+
+    validInvoices.forEach((invoice) => {
+      if (invoice.installation_date) {
+        const dateKey = invoice.installation_date;
+        if (!invoicesByDate[dateKey]) {
+          invoicesByDate[dateKey] = [];
+        }
+        invoicesByDate[dateKey].push(invoice);
+      } else {
+        invoicesWithoutDate.push(invoice);
+      }
+    });
+
+    // Sort dates and create ordered groups
+    const sortedDateKeys = Object.keys(invoicesByDate).sort((a, b) => {
+      return new Date(a) - new Date(b);
+    });
+
+    // Initialize result object - no empty M numbers, only create for actual invoices
+    const monthWiseSales = {};
+    let currentMonthNumber = 0; // Will start from M1
+
+    // Process invoices grouped by installation_date (sorted by date)
+    sortedDateKeys.forEach((dateKey) => {
+      // Sum all invoices for this installation_date
+      const totalAmount = invoicesByDate[dateKey].reduce((sum, invoice) => {
+        return sum + parseFloat(invoice.total_amount || 0);
+      }, 0);
+      
+      // Only add if amount is greater than 0
+      if (totalAmount > 0) {
+        currentMonthNumber++;
+        const monthKey = `M${currentMonthNumber}`;
+        monthWiseSales[monthKey] = totalAmount;
+      }
+    });
+
+    // Process invoices without installation_date (each gets its own M number)
+    invoicesWithoutDate.forEach((invoice) => {
+      const totalAmount = parseFloat(invoice.total_amount || 0);
+      
+      // Only add if amount is greater than 0
+      if (totalAmount > 0) {
+        currentMonthNumber++;
+        const monthKey = `M${currentMonthNumber}`;
+        monthWiseSales[monthKey] = totalAmount;
+      }
+    });
+
+    // Round all values to 2 decimal places and remove any zero values
+    const finalResult = {};
+    Object.keys(monthWiseSales).forEach((key) => {
+      const roundedValue = Math.round(monthWiseSales[key] * 100) / 100;
+      if (roundedValue > 0) {
+        finalResult[key] = roundedValue;
+      }
+    });
+
+    return sendSuccessRespose(
+      res,
+      finalResult,
+      "Month-wise sales data retrieved successfully",
+      200
+    );
+  } catch (error) {
+    console.error("Get month-wise sales error:", error);
+    return sendErrorResponse(
+      res,
+      "Failed to get month-wise sales data",
+      500
+    );
+  }
+};
