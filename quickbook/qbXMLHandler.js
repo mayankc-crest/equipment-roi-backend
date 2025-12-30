@@ -406,20 +406,20 @@ class QBXMLHandler {
         console.log(`📅 Found last invoice from: ${startDate}`);
       } else {
         // Edge case: No invoices in database, use default start date
-        console.log("in the else condition daxy:: ");
+        console.log("in the else condition :: ");
         startDate = "2025-01-01T00:00:00.000Z";
         console.log(
           `📅 No invoices found in database, using default start date: ${startDate}`
         );
       }
-      console.log("before the return condition daxy:: ");
+      console.log("before the return condition :: ");
       return {
         startDate: startDate,
         endDate: endDate,
       };
     } catch (error) {
       // Return fallback dates if there's an error
-      console.log("in the catch condition daxy:: ", error);
+      console.log("in the catch condition :: ", error);
       return {
         startDate: "2025-01-01T00:00:00.000Z",
         endDate: new Date().toISOString(),

@@ -17,81 +17,68 @@ exports.getCustomerROIReports = async (req, res) => {
   try {
     const { year, customer_id, page = 1, limit = 10 } = req.query;
 
-    let whereClause = {};
+    // Build where conditions for raw query
+    let whereConditions = [];
+    let replacements = {};
 
     // Year filter
     if (year) {
-      whereClause[Sequelize.Op.and] = [
-        Sequelize.where(
-          Sequelize.fn("YEAR", Sequelize.col("created_at")),
-          year
-        ),
-      ];
+      whereConditions.push("YEAR(logs_calc_roi.created_at) = :year");
+      replacements.year = parseInt(year);
     }
 
+    // Customer filter
     if (customer_id) {
-      whereClause.calc_roi_id = {
-        [Sequelize.Op.in]: Sequelize.literal(`(
-            SELECT id FROM calc_roi WHERE customer_id = ${customer_id}
-          )`),
-      };
+      whereConditions.push("logs_calc_roi.calc_roi_id IN (SELECT id FROM calc_roi WHERE customer_id = :customer_id)");
+      replacements.customer_id = parseInt(customer_id);
     }
+
+    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
 
     // Calculate offset for pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
+    const limitValue = parseInt(limit);
 
-    const customerSalesData = await LogsCalcRoi.findAll({
-      attributes: [
-        "calc_roi_id",
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.total_sales")),
-          "total_sales",
-        ],
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.total_recouped")),
-          "total_recouped",
-        ],
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.total_months")),
-          "total_months",
-        ],
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.sales_not_met")),
-          "sales_not_met",
-        ],
-        [
-          Sequelize.fn("COUNT", Sequelize.col("logs_calc_roi.id")),
-          "calculation_count",
-        ],
-      ],
-      where: whereClause,
-      group: ["calc_roi_id"],
-      order: [
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.total_sales")),
-          "DESC",
-        ],
-      ],
-      limit: parseInt(limit),
-      offset: offset,
-    });
+    // Get customer sales data using raw query
+    const customerSalesData = await LogsCalcRoi.sequelize.query(
+      `SELECT 
+        logs_calc_roi.calc_roi_id,
+        SUM(logs_calc_roi.total_sales) as total_sales,
+        SUM(logs_calc_roi.total_recouped) as total_recouped,
+        SUM(logs_calc_roi.total_months) as total_months,
+        SUM(logs_calc_roi.sales_not_met) as sales_not_met,
+        COUNT(logs_calc_roi.id) as calculation_count
+      FROM logs_calc_roi
+      ${whereSql}
+      GROUP BY logs_calc_roi.calc_roi_id
+      ORDER BY SUM(logs_calc_roi.total_sales) DESC
+      LIMIT :limitValue OFFSET :offset`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: { ...replacements, limitValue, offset }
+      }
+    );
 
     // Get customer data separately for each calc_roi_id
     const calcRoiIds = customerSalesData.map((item) => item.calc_roi_id);
-    const calcRoiData = await CalcRoi.findAll({
-      where: {
-        id: {
-          [Sequelize.Op.in]: calcRoiIds,
+    
+    let calcRoiData = [];
+    if (calcRoiIds.length > 0) {
+      calcRoiData = await CalcRoi.findAll({
+        where: {
+          id: {
+            [Sequelize.Op.in]: calcRoiIds,
+          },
         },
-      },
-      include: [
-        {
-          model: Customers,
-          as: "customer",
-          attributes: ["id", "first_name", "last_name", "company_name"],
-        },
-      ],
-    });
+        include: [
+          {
+            model: Customers,
+            as: "customer",
+            attributes: ["id", "first_name", "last_name", "company_name"],
+          },
+        ],
+      });
+    }
 
     // Create a map for quick lookup
     const calcRoiMap = {};
@@ -99,14 +86,20 @@ exports.getCustomerROIReports = async (req, res) => {
       calcRoiMap[roi.id] = roi;
     });
 
-    // Get total count for pagination
-    const totalCount = await LogsCalcRoi.count({
-      where: whereClause,
-      group: ["calc_roi_id"],
-      distinct: true,
-      col: "calc_roi_id",
-    });
+    // Get total count for pagination using raw query
+    const totalCountResult = await LogsCalcRoi.sequelize.query(
+      `SELECT COUNT(DISTINCT logs_calc_roi.calc_roi_id) as total
+      FROM logs_calc_roi
+      ${whereSql}`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: replacements
+      }
+    );
 
+    const totalCount = totalCountResult[0]?.total || 0;
+
+    // Format the response data - raw query returns plain objects
     const formattedData = customerSalesData.map((item) => {
       const calcRoi = calcRoiMap[item.calc_roi_id];
       const customer = calcRoi?.customer;
@@ -117,11 +110,11 @@ exports.getCustomerROIReports = async (req, res) => {
           ? `${customer.first_name} ${customer.last_name}`
           : "Unknown",
         company_name: customer?.company_name || "",
-        total_sales: parseFloat(item.dataValues.total_sales || 0),
-        recouped: parseFloat(item.dataValues.total_recouped || 0),
-        total_months: parseInt(item.dataValues.total_months || 0),
-        not_met: parseInt(item.dataValues.sales_not_met || 0),
-        calculation_count: parseInt(item.dataValues.calculation_count || 0),
+        total_sales: parseFloat(item.total_sales || 0),
+        recouped: parseFloat(item.total_recouped || 0),
+        total_months: parseInt(item.total_months || 0),
+        not_met: parseInt(item.sales_not_met || 0),
+        calculation_count: parseInt(item.calculation_count || 0),
       };
     });
 
@@ -130,13 +123,8 @@ exports.getCustomerROIReports = async (req, res) => {
       pagination: {
         current_page: parseInt(page),
         per_page: parseInt(limit),
-        total_records: Array.isArray(totalCount)
-          ? totalCount.length
-          : totalCount,
-        total_pages: Math.ceil(
-          (Array.isArray(totalCount) ? totalCount.length : totalCount) /
-            parseInt(limit)
-        ),
+        total_records: totalCount,
+        total_pages: Math.ceil(totalCount / parseInt(limit)),
       },
       filters: {
         year: year || null,
@@ -163,85 +151,63 @@ exports.getROIByProductEquipmentReports = async (req, res) => {
   try {
     const { year, customer_id, page = 1, limit = 10 } = req.query;
 
-    // Build where clause for filters
-    let whereClause = {};
+    // Build where conditions for raw query
+    let whereConditions = [];
+    let replacements = {};
 
     // Year filter
     if (year) {
-      whereClause[Sequelize.Op.and] = [
-        Sequelize.where(
-          Sequelize.fn("YEAR", Sequelize.col("invoice_line_items.created_at")),
-          year
-        ),
-      ];
+      whereConditions.push("YEAR(invoice_line_items.created_at) = :year");
+      replacements.year = parseInt(year);
     }
 
-    // Customer filter - handled in the invoice include below
+    // Customer filter
+    if (customer_id) {
+      whereConditions.push("invoices.customer_id = :customer_id");
+      replacements.customer_id = parseInt(customer_id);
+    }
+
+    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
 
     // Calculate offset for pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
+    const limitValue = parseInt(limit);
 
-    // Get ROI data grouped by product/equipment
-    const roiData = await InvoiceLineItems.findAll({
-      attributes: [
-        "product_id",
-        [
-          Sequelize.fn("SUM", Sequelize.col("invoice_line_items.amount")),
-          "total_lease_cost",
-        ],
-        [
-          Sequelize.fn("COUNT", Sequelize.col("invoice_line_items.id")),
-          "number_of_invoices",
-        ],
-        [
-          Sequelize.fn("SUM", Sequelize.col("invoice_line_items.amount")),
-          "total_sales_profit",
-        ],
-      ],
-      include: [
-        {
-          model: Products,
-          as: "product",
-          attributes: ["id", "name", "full_name"],
-          required: true,
-        },
-        {
-          model: Invoices,
-          as: "invoice",
-          attributes: [],
-          where: customer_id ? { customer_id: customer_id } : {},
-          required: true,
-        },
-      ],
-      where: whereClause,
-      group: ["product_id", "product.id"],
-      order: [
-        [
-          Sequelize.fn("SUM", Sequelize.col("invoice_line_items.amount")),
-          "DESC",
-        ],
-      ],
-      limit: parseInt(limit),
-      offset: offset,
-    });
+    // Get ROI data grouped by product/equipment using raw query
+    const roiData = await InvoiceLineItems.sequelize.query(
+      `SELECT 
+        invoice_line_items.product_id,
+        products.id as product_id,
+        products.name as product_name,
+        products.full_name as product_full_name,
+        SUM(invoice_line_items.amount) as total_lease_cost,
+        COUNT(invoice_line_items.id) as number_of_invoices,
+        SUM(invoice_line_items.amount) as total_sales_profit
+      FROM invoice_line_items
+      INNER JOIN products ON invoice_line_items.product_id = products.id
+      INNER JOIN invoices ON invoice_line_items.invoice_id = invoices.id
+      ${whereSql}
+      GROUP BY invoice_line_items.product_id, products.id, products.name, products.full_name
+      ORDER BY SUM(invoice_line_items.amount) DESC
+      LIMIT :limitValue OFFSET :offset`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: { ...replacements, limitValue, offset }
+      }
+    );
 
     // Format the response data
     const formattedData = roiData.map((item) => {
-      const product = item.product;
-      const totalLeaseCost = parseFloat(item.dataValues.total_lease_cost || 0);
-      const totalSalesProfit = parseFloat(
-        item.dataValues.total_sales_profit || 0
-      );
+      const totalLeaseCost = parseFloat(item.total_lease_cost || 0);
+      const totalSalesProfit = parseFloat(item.total_sales_profit || 0);
       const netROI = totalSalesProfit - totalLeaseCost;
       const roiPercentage =
         totalLeaseCost > 0 ? (netROI / totalLeaseCost) * 100 : 0;
-      const numberOfInvoices = parseInt(
-        item.dataValues.number_of_invoices || 0
-      );
+      const numberOfInvoices = parseInt(item.number_of_invoices || 0);
 
       return {
-        product_id: product?.id || null,
-        product_name: product?.name || product?.full_name || "Unknown Product",
+        product_id: item.product_id || null,
+        product_name: item.product_name || item.product_full_name || "Unknown Product",
         lease_cost: totalLeaseCost,
         sales_profit: totalSalesProfit,
         net_roi: netROI,
@@ -250,31 +216,19 @@ exports.getROIByProductEquipmentReports = async (req, res) => {
       };
     });
 
-    // Get total count for pagination
-    const totalCountResult = await InvoiceLineItems.findAll({
-      attributes: [
-        [
-          Sequelize.fn(
-            "COUNT",
-            Sequelize.fn("DISTINCT", Sequelize.col("product_id"))
-          ),
-          "count",
-        ],
-      ],
-      include: [
-        {
-          model: Invoices,
-          as: "invoice",
-          attributes: [],
-          where: customer_id ? { customer_id: customer_id } : {},
-          required: true,
-        },
-      ],
-      where: whereClause,
-      raw: true,
-    });
+    // Get total count for pagination using raw query
+    const totalCountResult = await InvoiceLineItems.sequelize.query(
+      `SELECT COUNT(DISTINCT invoice_line_items.product_id) as total
+      FROM invoice_line_items
+      INNER JOIN invoices ON invoice_line_items.invoice_id = invoices.id
+      ${whereSql}`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: replacements
+      }
+    );
 
-    const totalCount = totalCountResult[0]?.count || 0;
+    const totalCount = totalCountResult[0]?.total || 0;
 
     const response = {
       data: formattedData,
@@ -313,94 +267,53 @@ exports.getTopProductsWithDropoffsReports = async (req, res) => {
 
     // Calculate offset for pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
+    const limitValue = parseInt(limit);
 
-    // Get product purchase data grouped by product using raw query approach
-    const productData = await CalcInvoiceLineItems.findAll({
-      attributes: [
-        [Sequelize.col("lineItem.product_id"), "product_id"],
-        [
-          Sequelize.fn(
-            "MIN",
-            Sequelize.col("calc_invoice_line_items.created_at")
-          ),
-          "first_purchase_date",
-        ],
-        [
-          Sequelize.fn(
-            "MAX",
-            Sequelize.col("calc_invoice_line_items.created_at")
-          ),
-          "last_purchase_date",
-        ],
-        [
-          Sequelize.fn("COUNT", Sequelize.col("calc_invoice_line_items.id")),
-          "total_purchases",
-        ],
-      ],
-      include: [
-        {
-          model: InvoiceLineItems,
-          as: "lineItem",
-          attributes: [],
-          required: true,
-          include: [
-            {
-              model: Products,
-              as: "product",
-              attributes: ["id", "name", "full_name"],
-              required: true,
-              where: search
-                ? {
-                    [Sequelize.Op.or]: [
-                      { name: { [Sequelize.Op.like]: `%${search}%` } },
-                      { full_name: { [Sequelize.Op.like]: `%${search}%` } },
-                    ],
-                  }
-                : {},
-            },
-          ],
-        },
-      ],
-      group: [Sequelize.col("lineItem.product_id")],
-      order: [
-        [
-          Sequelize.fn("COUNT", Sequelize.col("calc_invoice_line_items.id")),
-          "DESC",
-        ],
-      ],
-      limit: parseInt(limit),
-      offset: offset,
-    });
+    // Build where conditions for raw query
+    let whereConditions = [];
+    let replacements = {};
 
-    // Get product details separately
-    const productIds = productData.map((item) => item.dataValues.product_id);
-    const products = await Products.findAll({
-      where: {
-        id: {
-          [Sequelize.Op.in]: productIds,
-        },
-      },
-      attributes: ["id", "name", "full_name"],
-    });
+    // Search filter
+    if (search) {
+      whereConditions.push("(products.name LIKE :search OR products.full_name LIKE :search)");
+      replacements.search = `%${search}%`;
+    }
 
-    // Create a map for quick lookup
-    const productMap = {};
-    products.forEach((product) => {
-      productMap[product.id] = product;
-    });
+    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
+
+    // Get product purchase data grouped by product using raw query
+    const productData = await CalcInvoiceLineItems.sequelize.query(
+      `SELECT 
+        invoice_line_items.product_id,
+        MIN(calc_invoice_line_items.created_at) as first_purchase_date,
+        MAX(calc_invoice_line_items.created_at) as last_purchase_date,
+        COUNT(calc_invoice_line_items.id) as total_purchases,
+        products.id as product_id,
+        products.name as product_name,
+        products.full_name as product_full_name
+      FROM calc_invoice_line_items
+      INNER JOIN invoice_line_items ON calc_invoice_line_items.line_item_id = invoice_line_items.id
+      INNER JOIN products ON invoice_line_items.product_id = products.id
+      ${whereSql}
+      GROUP BY invoice_line_items.product_id, products.id, products.name, products.full_name
+      ORDER BY COUNT(calc_invoice_line_items.id) DESC
+      LIMIT :limitValue OFFSET :offset`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: { ...replacements, limitValue, offset }
+      }
+    );
 
     // Calculate drop-off percentage for each product
-
     const formattedData = await Promise.all(
       productData.map(async (item) => {
-        // Get product data from the product map
-        const productId = item.dataValues.product_id;
-        const product = productMap[productId];
-        const productName = product?.name;
-        const productFullName = product?.full_name;
-        const firstPurchaseDate = new Date(item.dataValues.first_purchase_date);
-        const lastPurchaseDate = new Date(item.dataValues.last_purchase_date);
-        const totalPurchases = parseInt(item.dataValues.total_purchases || 0);
+        // Get product data
+        const productId = item.product_id;
+        const productName = item.product_name;
+        const productFullName = item.product_full_name;
+        const firstPurchaseDate = new Date(item.first_purchase_date);
+        const lastPurchaseDate = new Date(item.last_purchase_date);
+        const totalPurchases = parseInt(item.total_purchases || 0);
 
         // Step 1: Calculate Months Active
         const monthsActive =
@@ -427,23 +340,24 @@ exports.getTopProductsWithDropoffsReports = async (req, res) => {
           59
         );
 
-        const lastMonthPurchases = await CalcInvoiceLineItems.count({
-          where: {
-            created_at: {
-              [Sequelize.Op.between]: [lastMonthStart, lastMonthEnd],
-            },
-          },
-          include: [
-            {
-              model: InvoiceLineItems,
-              as: "lineItem",
-              where: {
-                product_id: item.dataValues.product_id,
-              },
-              required: true,
-            },
-          ],
-        });
+        // Get last month purchases using raw query
+        const lastMonthPurchasesResult = await CalcInvoiceLineItems.sequelize.query(
+          `SELECT COUNT(calc_invoice_line_items.id) as count
+          FROM calc_invoice_line_items
+          INNER JOIN invoice_line_items ON calc_invoice_line_items.line_item_id = invoice_line_items.id
+          WHERE invoice_line_items.product_id = :product_id
+          AND calc_invoice_line_items.created_at BETWEEN :lastMonthStart AND :lastMonthEnd`,
+          {
+            type: Sequelize.QueryTypes.SELECT,
+            replacements: {
+              product_id: productId,
+              lastMonthStart: lastMonthStart,
+              lastMonthEnd: lastMonthEnd
+            }
+          }
+        );
+
+        const lastMonthPurchases = parseInt(lastMonthPurchasesResult[0]?.count || 0);
 
         // Step 4: Calculate Drop-off Percentage
         const dropOffPercentage =
@@ -468,45 +382,20 @@ exports.getTopProductsWithDropoffsReports = async (req, res) => {
       })
     );
 
-    // Get total count for pagination
-    const totalCountResult = await CalcInvoiceLineItems.findAll({
-      attributes: [
-        [
-          Sequelize.fn(
-            "COUNT",
-            Sequelize.fn("DISTINCT", Sequelize.col("lineItem.product_id"))
-          ),
-          "count",
-        ],
-      ],
-      include: [
-        {
-          model: InvoiceLineItems,
-          as: "lineItem",
-          attributes: [],
-          required: true,
-          include: [
-            {
-              model: Products,
-              as: "product",
-              attributes: [],
-              required: true,
-              where: search
-                ? {
-                    [Sequelize.Op.or]: [
-                      { name: { [Sequelize.Op.like]: `%${search}%` } },
-                      { full_name: { [Sequelize.Op.like]: `%${search}%` } },
-                    ],
-                  }
-                : {},
-            },
-          ],
-        },
-      ],
-      raw: true,
-    });
+    // Get total count for pagination using raw query
+    const totalCountResult = await CalcInvoiceLineItems.sequelize.query(
+      `SELECT COUNT(DISTINCT invoice_line_items.product_id) as count
+      FROM calc_invoice_line_items
+      INNER JOIN invoice_line_items ON calc_invoice_line_items.line_item_id = invoice_line_items.id
+      INNER JOIN products ON invoice_line_items.product_id = products.id
+      ${whereSql}`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: replacements
+      }
+    );
 
-    const totalCount = totalCountResult[0]?.count || 0;
+    const totalCount = parseInt(totalCountResult[0]?.count || 0);
 
     const response = {
       data: formattedData,
@@ -549,175 +438,74 @@ exports.getCustomerDropoffByProductReports = async (req, res) => {
       sort_order = "DESC",
     } = req.query;
 
-    // Calculate offset for pagination
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-
-    // Build where clause for filters
-    let whereClause = {};
+    // Build where conditions for raw query
+    let whereConditions = [];
+    let replacements = {};
 
     // Product name filter
     if (product_name) {
-      whereClause[Sequelize.Op.and] = [
-        ...(whereClause[Sequelize.Op.and] || []),
-        {
-          "$lineItem.product.name$": {
-            [Sequelize.Op.like]: `%${product_name}%`,
-          },
-        },
-      ];
+      whereConditions.push("(products.name LIKE :product_name OR products.full_name LIKE :product_name)");
+      replacements.product_name = `%${product_name}%`;
     }
 
     // Customer name filter
     if (customer_name) {
-      whereClause[Sequelize.Op.and] = [
-        ...(whereClause[Sequelize.Op.and] || []),
-        {
-          [Sequelize.Op.or]: [
-            {
-              "$calcInvoice.roi.customer.first_name$": {
-                [Sequelize.Op.like]: `%${customer_name}%`,
-              },
-            },
-            {
-              "$calcInvoice.roi.customer.last_name$": {
-                [Sequelize.Op.like]: `%${customer_name}%`,
-              },
-            },
-            {
-              "$calcInvoice.roi.customer.company_name$": {
-                [Sequelize.Op.like]: `%${customer_name}%`,
-              },
-            },
-          ],
-        },
-      ];
+      whereConditions.push("(customers.first_name LIKE :customer_name OR customers.last_name LIKE :customer_name OR customers.company_name LIKE :customer_name)");
+      replacements.customer_name = `%${customer_name}%`;
     }
 
-    // Get customer drop-off data grouped by product and customer
-    const dropoffData = await CalcInvoiceLineItems.findAll({
-      attributes: [
-        [Sequelize.col("lineItem.product_id"), "product_id"],
-        [Sequelize.col("calcInvoice.roi.customer_id"), "customer_id"],
-        [
-          Sequelize.fn(
-            "MIN",
-            Sequelize.col("calc_invoice_line_items.created_at")
-          ),
-          "first_purchase_date",
-        ],
-        [
-          Sequelize.fn(
-            "MAX",
-            Sequelize.col("calc_invoice_line_items.created_at")
-          ),
-          "last_purchase_date",
-        ],
-        [
-          Sequelize.fn("COUNT", Sequelize.col("calc_invoice_line_items.id")),
-          "total_purchases",
-        ],
-      ],
-      include: [
-        {
-          model: InvoiceLineItems,
-          as: "lineItem",
-          attributes: [],
-          required: true,
-          include: [
-            {
-              model: Products,
-              as: "product",
-              attributes: ["id", "name", "full_name"],
-              required: true,
-            },
-          ],
-        },
-        {
-          model: CalcInvoices,
-          as: "calcInvoice",
-          attributes: [],
-          required: true,
-          include: [
-            {
-              model: CalcRoi,
-              as: "roi",
-              attributes: [],
-              required: true,
-              include: [
-                {
-                  model: Customers,
-                  as: "customer",
-                  attributes: ["id", "first_name", "last_name", "company_name"],
-                  required: true,
-                },
-              ],
-            },
-          ],
-        },
-      ],
-      where: whereClause,
-      group: [
-        Sequelize.col("lineItem.product_id"),
-        Sequelize.col("calcInvoice.roi.customer_id"),
-      ],
-      order: [
-        [
-          Sequelize.col(
-            sort_by === "days_since_last_purchase"
-              ? "last_purchase_date"
-              : sort_by === "product_name"
-              ? "lineItem.product.name"
-              : sort_by === "customer_name"
-              ? "calcInvoice.roi.customer.first_name"
-              : "last_purchase_date"
-          ),
-          sort_order.toUpperCase(),
-        ],
-      ],
-      limit: parseInt(limit),
-      offset: offset,
-    });
+    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
 
-    // Get product and customer details separately for better performance
-    const productIds = [
-      ...new Set(dropoffData.map((item) => item.dataValues.product_id)),
-    ];
-    const customerIds = [
-      ...new Set(dropoffData.map((item) => item.dataValues.customer_id)),
-    ];
+    // Build ORDER BY clause
+    let orderByClause = "MAX(calc_invoice_line_items.created_at) DESC";
+    if (sort_by === "product_name") {
+      orderByClause = "products.name " + (sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC");
+    } else if (sort_by === "customer_name") {
+      orderByClause = "customers.first_name " + (sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC");
+    } else if (sort_by === "days_since_last_purchase") {
+      orderByClause = "MAX(calc_invoice_line_items.created_at) " + (sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC");
+    }
 
-    const [products, customers] = await Promise.all([
-      Products.findAll({
-        where: { id: { [Sequelize.Op.in]: productIds } },
-        attributes: ["id", "name", "full_name"],
-      }),
-      Customers.findAll({
-        where: { id: { [Sequelize.Op.in]: customerIds } },
-        attributes: ["id", "first_name", "last_name", "company_name"],
-      }),
-    ]);
+    // Calculate offset for pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const limitValue = parseInt(limit);
 
-    // Create maps for quick lookup
-    const productMap = {};
-    products.forEach((product) => {
-      productMap[product.id] = product;
-    });
-
-    const customerMap = {};
-    customers.forEach((customer) => {
-      customerMap[customer.id] = customer;
-    });
+    // Get customer drop-off data grouped by product and customer using raw query
+    const dropoffData = await CalcInvoiceLineItems.sequelize.query(
+      `SELECT 
+        invoice_line_items.product_id,
+        calc_roi.customer_id,
+        MIN(calc_invoice_line_items.created_at) as first_purchase_date,
+        MAX(calc_invoice_line_items.created_at) as last_purchase_date,
+        COUNT(calc_invoice_line_items.id) as total_purchases,
+        products.id as product_id,
+        products.name as product_name,
+        products.full_name as product_full_name,
+        customers.id as customer_id,
+        customers.first_name as customer_first_name,
+        customers.last_name as customer_last_name,
+        customers.company_name as customer_company_name
+      FROM calc_invoice_line_items
+      INNER JOIN invoice_line_items ON calc_invoice_line_items.line_item_id = invoice_line_items.id
+      INNER JOIN products ON invoice_line_items.product_id = products.id
+      INNER JOIN calc_invoices ON calc_invoice_line_items.calc_invoice_id = calc_invoices.id
+      INNER JOIN calc_roi ON calc_invoices.roi_id = calc_roi.id
+      INNER JOIN customers ON calc_roi.customer_id = customers.id
+      ${whereSql}
+      GROUP BY invoice_line_items.product_id, calc_roi.customer_id, products.id, products.name, products.full_name, customers.id, customers.first_name, customers.last_name, customers.company_name
+      ORDER BY ${orderByClause}
+      LIMIT :limitValue OFFSET :offset`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: { ...replacements, limitValue, offset }
+      }
+    );
 
     // Calculate days since last purchase and format data
     const formattedData = dropoffData.map((item) => {
-      const productId = item.dataValues.product_id;
-      const customerId = item.dataValues.customer_id;
-      const product = productMap[productId];
-      const customer = customerMap[customerId];
-
-      const firstPurchaseDate = new Date(item.dataValues.first_purchase_date);
-      const lastPurchaseDate = new Date(item.dataValues.last_purchase_date);
-      const totalPurchases = parseInt(item.dataValues.total_purchases || 0);
+      const firstPurchaseDate = new Date(item.first_purchase_date);
+      const lastPurchaseDate = new Date(item.last_purchase_date);
+      const totalPurchases = parseInt(item.total_purchases || 0);
 
       // Calculate days since last purchase
       const currentDate = new Date();
@@ -725,14 +513,15 @@ exports.getCustomerDropoffByProductReports = async (req, res) => {
         (currentDate - lastPurchaseDate) / (1000 * 60 * 60 * 24)
       );
 
+      const customerName = item.customer_first_name && item.customer_last_name
+        ? `${item.customer_first_name} ${item.customer_last_name}`.trim()
+        : item.customer_company_name || "Unknown Customer";
+
       return {
-        product_id: productId,
-        product_name: product?.name || product?.full_name || "Unknown Product",
-        customer_id: customerId,
-        customer_name: customer
-          ? `${customer.first_name} ${customer.last_name}`.trim() ||
-            customer.company_name
-          : "Unknown Customer",
+        product_id: item.product_id || null,
+        product_name: item.product_name || item.product_full_name || "Unknown Product",
+        customer_id: item.customer_id || null,
+        customer_name: customerName,
         first_purchase_date: firstPurchaseDate.toISOString().split("T")[0],
         last_purchase_date: lastPurchaseDate.toISOString().split("T")[0],
         total_purchases: totalPurchases,
@@ -740,68 +529,23 @@ exports.getCustomerDropoffByProductReports = async (req, res) => {
       };
     });
 
-    // Get total count for pagination
-    const totalCountResult = await CalcInvoiceLineItems.findAll({
-      attributes: [
-        [
-          Sequelize.fn(
-            "COUNT",
-            Sequelize.fn(
-              "DISTINCT",
-              Sequelize.fn(
-                "CONCAT",
-                Sequelize.col("lineItem.product_id"),
-                "-",
-                Sequelize.col("calcInvoice.roi.customer_id")
-              )
-            )
-          ),
-          "count",
-        ],
-      ],
-      include: [
-        {
-          model: InvoiceLineItems,
-          as: "lineItem",
-          attributes: [],
-          required: true,
-          include: [
-            {
-              model: Products,
-              as: "product",
-              attributes: [],
-              required: true,
-            },
-          ],
-        },
-        {
-          model: CalcInvoices,
-          as: "calcInvoice",
-          attributes: [],
-          required: true,
-          include: [
-            {
-              model: CalcRoi,
-              as: "roi",
-              attributes: [],
-              required: true,
-              include: [
-                {
-                  model: Customers,
-                  as: "customer",
-                  attributes: [],
-                  required: true,
-                },
-              ],
-            },
-          ],
-        },
-      ],
-      where: whereClause,
-      raw: true,
-    });
+    // Get total count for pagination using raw query
+    const totalCountResult = await CalcInvoiceLineItems.sequelize.query(
+      `SELECT COUNT(DISTINCT CONCAT(invoice_line_items.product_id, '-', calc_roi.customer_id)) as total
+      FROM calc_invoice_line_items
+      INNER JOIN invoice_line_items ON calc_invoice_line_items.line_item_id = invoice_line_items.id
+      INNER JOIN products ON invoice_line_items.product_id = products.id
+      INNER JOIN calc_invoices ON calc_invoice_line_items.calc_invoice_id = calc_invoices.id
+      INNER JOIN calc_roi ON calc_invoices.roi_id = calc_roi.id
+      INNER JOIN customers ON calc_roi.customer_id = customers.id
+      ${whereSql}`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: replacements
+      }
+    );
 
-    const totalCount = totalCountResult[0]?.count || 0;
+    const totalCount = totalCountResult[0]?.total || 0;
 
     const response = {
       data: formattedData,
@@ -853,156 +597,76 @@ exports.getProductLifecycleReports = async (req, res) => {
     const settings = await Settings.findOne();
     const customerInactiveDays = settings?.customer_inactive || 90; // Default to 90 days if not set
 
-    // Build where clause for filters
-    let whereClause = {};
+    // Build where conditions for raw query
+    let whereConditions = [];
+    let replacements = {};
 
     // Customer filter
     if (customer_id) {
-      whereClause[Sequelize.Op.and] = [
-        ...(whereClause[Sequelize.Op.and] || []),
-        {
-          "$calcInvoice.roi.customer_id$": customer_id,
-        },
-      ];
+      whereConditions.push("calc_roi.customer_id = :customer_id");
+      replacements.customer_id = parseInt(customer_id);
     }
 
-    // Get product lifecycle data grouped by product
-    const lifecycleData = await CalcInvoiceLineItems.findAll({
-      attributes: [
-        [Sequelize.col("lineItem.product_id"), "product_id"],
-        [
-          Sequelize.fn(
-            "COUNT",
-            Sequelize.fn(
-              "DISTINCT",
-              Sequelize.col("calcInvoice.roi.customer_id")
-            )
-          ),
-          "total_customers",
-        ],
-        [
-          Sequelize.fn(
-            "MIN",
-            Sequelize.col("calc_invoice_line_items.created_at")
-          ),
-          "first_purchase_date",
-        ],
-        [
-          Sequelize.fn(
-            "MAX",
-            Sequelize.col("calc_invoice_line_items.created_at")
-          ),
-          "last_purchase_date",
-        ],
-      ],
-      include: [
-        {
-          model: InvoiceLineItems,
-          as: "lineItem",
-          attributes: [],
-          required: true,
-          include: [
-            {
-              model: Products,
-              as: "product",
-              attributes: ["id", "name", "full_name"],
-              required: true,
-            },
-          ],
-        },
-        {
-          model: CalcInvoices,
-          as: "calcInvoice",
-          attributes: [],
-          required: true,
-          include: [
-            {
-              model: CalcRoi,
-              as: "roi",
-              attributes: [],
-              required: true,
-            },
-          ],
-        },
-      ],
-      where: whereClause,
-      group: [Sequelize.col("lineItem.product_id")],
-      order: [
-        [
-          Sequelize.col(
-            sort_by === "total_customers"
-              ? "total_customers"
-              : sort_by === "product_name"
-              ? "lineItem.product.name"
-              : "total_customers"
-          ),
-          sort_order.toUpperCase(),
-        ],
-      ],
-      limit: parseInt(limit),
-      offset: offset,
-    });
+    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
 
-    // Get product details separately for better performance
-    const productIds = [
-      ...new Set(lifecycleData.map((item) => item.dataValues.product_id)),
-    ];
-    const products = await Products.findAll({
-      where: { id: { [Sequelize.Op.in]: productIds } },
-      attributes: ["id", "name", "full_name"],
-    });
+    // Build ORDER BY clause
+    let orderByClause = "COUNT(DISTINCT calc_roi.customer_id) DESC";
+    if (sort_by === "product_name") {
+      orderByClause = "products.name " + (sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC");
+    } else if (sort_by === "total_customers") {
+      orderByClause = "COUNT(DISTINCT calc_roi.customer_id) " + (sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC");
+    }
 
-    // Create a map for quick lookup
-    const productMap = {};
-    products.forEach((product) => {
-      productMap[product.id] = product;
-    });
+    const limitValue = parseInt(limit);
+
+    // Get product lifecycle data grouped by product using raw query
+    const lifecycleData = await CalcInvoiceLineItems.sequelize.query(
+      `SELECT 
+        invoice_line_items.product_id,
+        products.id as product_id,
+        products.name as product_name,
+        products.full_name as product_full_name,
+        COUNT(DISTINCT calc_roi.customer_id) as total_customers,
+        MIN(calc_invoice_line_items.created_at) as first_purchase_date,
+        MAX(calc_invoice_line_items.created_at) as last_purchase_date
+      FROM calc_invoice_line_items
+      INNER JOIN invoice_line_items ON calc_invoice_line_items.line_item_id = invoice_line_items.id
+      INNER JOIN products ON invoice_line_items.product_id = products.id
+      INNER JOIN calc_invoices ON calc_invoice_line_items.calc_invoice_id = calc_invoices.id
+      INNER JOIN calc_roi ON calc_invoices.roi_id = calc_roi.id
+      ${whereSql}
+      GROUP BY invoice_line_items.product_id, products.id, products.name, products.full_name
+      ORDER BY ${orderByClause}
+      LIMIT :limitValue OFFSET :offset`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: { ...replacements, limitValue, offset }
+      }
+    );
 
     // Calculate active and lapsed customers for each product
     const formattedData = await Promise.all(
       lifecycleData.map(async (item) => {
-        const productId = item.dataValues.product_id;
-        const product = productMap[productId];
-        const totalCustomers = parseInt(item.dataValues.total_customers || 0);
+        const productId = item.product_id;
+        const totalCustomers = parseInt(item.total_customers || 0);
 
-        // Get all customers who purchased this product
-        const customerData = await CalcInvoiceLineItems.findAll({
-          attributes: [
-            [Sequelize.col("calcInvoice.roi.customer_id"), "customer_id"],
-            [
-              Sequelize.fn(
-                "MAX",
-                Sequelize.col("calc_invoice_line_items.created_at")
-              ),
-              "last_purchase_date",
-            ],
-          ],
-          include: [
-            {
-              model: InvoiceLineItems,
-              as: "lineItem",
-              attributes: [],
-              required: true,
-              where: { product_id: productId },
-            },
-            {
-              model: CalcInvoices,
-              as: "calcInvoice",
-              attributes: [],
-              required: true,
-              include: [
-                {
-                  model: CalcRoi,
-                  as: "roi",
-                  attributes: [],
-                  required: true,
-                },
-              ],
-            },
-          ],
-          group: [Sequelize.col("calcInvoice.roi.customer_id")],
-          raw: true,
-        });
+        // Get all customers who purchased this product using raw query
+        const customerData = await CalcInvoiceLineItems.sequelize.query(
+          `SELECT 
+            calc_roi.customer_id,
+            MAX(calc_invoice_line_items.created_at) as last_purchase_date
+          FROM calc_invoice_line_items
+          INNER JOIN invoice_line_items ON calc_invoice_line_items.line_item_id = invoice_line_items.id
+          INNER JOIN calc_invoices ON calc_invoice_line_items.calc_invoice_id = calc_invoices.id
+          INNER JOIN calc_roi ON calc_invoices.roi_id = calc_roi.id
+          WHERE invoice_line_items.product_id = :productId
+          ${customer_id ? "AND calc_roi.customer_id = :customer_id" : ""}
+          GROUP BY calc_roi.customer_id`,
+          {
+            type: Sequelize.QueryTypes.SELECT,
+            replacements: { productId, ...(customer_id ? { customer_id: parseInt(customer_id) } : {}) }
+          }
+        );
 
         // Calculate active and lapsed customers
         const currentDate = new Date();
@@ -1024,8 +688,7 @@ exports.getProductLifecycleReports = async (req, res) => {
 
         return {
           product_id: productId,
-          product_name:
-            product?.name || product?.full_name || "Unknown Product",
+          product_name: item.product_name || item.product_full_name || "Unknown Product",
           total_customers_purchased: totalCustomers,
           active_customers: activeCustomers,
           lapsed_customers: lapsedCustomers,
@@ -1033,52 +696,21 @@ exports.getProductLifecycleReports = async (req, res) => {
       })
     );
 
-    // Get total count for pagination
-    const totalCountResult = await CalcInvoiceLineItems.findAll({
-      attributes: [
-        [
-          Sequelize.fn(
-            "COUNT",
-            Sequelize.fn("DISTINCT", Sequelize.col("lineItem.product_id"))
-          ),
-          "count",
-        ],
-      ],
-      include: [
-        {
-          model: InvoiceLineItems,
-          as: "lineItem",
-          attributes: [],
-          required: true,
-          include: [
-            {
-              model: Products,
-              as: "product",
-              attributes: [],
-              required: true,
-            },
-          ],
-        },
-        {
-          model: CalcInvoices,
-          as: "calcInvoice",
-          attributes: [],
-          required: true,
-          include: [
-            {
-              model: CalcRoi,
-              as: "roi",
-              attributes: [],
-              required: true,
-            },
-          ],
-        },
-      ],
-      where: whereClause,
-      raw: true,
-    });
+    // Get total count for pagination using raw query
+    const totalCountResult = await CalcInvoiceLineItems.sequelize.query(
+      `SELECT COUNT(DISTINCT invoice_line_items.product_id) as total
+      FROM calc_invoice_line_items
+      INNER JOIN invoice_line_items ON calc_invoice_line_items.line_item_id = invoice_line_items.id
+      INNER JOIN calc_invoices ON calc_invoice_line_items.calc_invoice_id = calc_invoices.id
+      INNER JOIN calc_roi ON calc_invoices.roi_id = calc_roi.id
+      ${whereSql}`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: replacements
+      }
+    );
 
-    const totalCount = totalCountResult[0]?.count || 0;
+    const totalCount = totalCountResult[0]?.total || 0;
 
     const response = {
       data: formattedData,
@@ -1125,102 +757,76 @@ exports.getUnderperformingCustomersReports = async (req, res) => {
 
     // Calculate offset for pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
+    const limitValue = parseInt(limit);
 
-    // Build where clause for year filter
-    let whereClause = {};
+    // Build where conditions for raw query
+    let whereConditions = [];
+    let replacements = {};
+
+    // Year filter
     if (year) {
-      whereClause[Sequelize.Op.and] = [
-        Sequelize.where(
-          Sequelize.fn("YEAR", Sequelize.col("logs_calc_roi.created_at")),
-          year
-        ),
-      ];
+      whereConditions.push("YEAR(logs_calc_roi.created_at) = :year");
+      replacements.year = parseInt(year);
     }
 
-    // Get underperforming customers data from logs_calc_roi
-    const underperformingData = await LogsCalcRoi.findAll({
-      attributes: [
-        "calc_roi_id",
-        [
-          Sequelize.fn(
-            "SUM",
-            Sequelize.col("logs_calc_roi.monthly_sales_required")
-          ),
-          "total_minimum_sales_required",
-        ],
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.total_sales")),
-          "total_actual_sales",
-        ],
-        [
-          Sequelize.fn("COUNT", Sequelize.col("logs_calc_roi.id")),
-          "calculation_count",
-        ],
-      ],
-      where: whereClause,
-      group: ["calc_roi_id"],
-      order: [
-        [
-          Sequelize.col(
-            sort_by === "sales_gap"
-              ? "total_minimum_sales_required"
-              : "total_minimum_sales_required"
-          ),
-          sort_order.toUpperCase(),
-        ],
-      ],
-      limit: parseInt(limit),
-      offset: offset,
-    });
+    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
 
-    // Get customer details separately for better performance
-    const calcRoiIds = [
-      ...new Set(underperformingData.map((item) => item.calc_roi_id)),
-    ];
-    const calcRoiData = await CalcRoi.findAll({
-      where: {
-        id: {
-          [Sequelize.Op.in]: calcRoiIds,
-        },
-      },
-      include: [
-        {
-          model: Customers,
-          as: "customer",
-          attributes: ["id", "first_name", "last_name", "company_name"],
-        },
-      ],
-    });
+    // Determine order by clause
+    let orderByClause = "total_minimum_sales_required DESC";
+    if (sort_by === "sales_gap") {
+      // We'll sort by sales_gap after calculating it
+      orderByClause = "total_minimum_sales_required " + (sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC");
+    } else {
+      orderByClause = "total_minimum_sales_required " + (sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC");
+    }
 
-    // Create a map for quick lookup
-    const calcRoiMap = {};
-    calcRoiData.forEach((roi) => {
-      calcRoiMap[roi.id] = roi;
-    });
+    // Get underperforming customers data from logs_calc_roi using raw query
+    const underperformingData = await LogsCalcRoi.sequelize.query(
+      `SELECT 
+        logs_calc_roi.calc_roi_id,
+        SUM(logs_calc_roi.monthly_sales_required) as total_minimum_sales_required,
+        SUM(logs_calc_roi.total_sales) as total_actual_sales,
+        COUNT(logs_calc_roi.id) as calculation_count,
+        calc_roi.customer_id,
+        customers.id as customer_id,
+        customers.first_name,
+        customers.last_name,
+        customers.company_name
+      FROM logs_calc_roi
+      INNER JOIN calc_roi ON logs_calc_roi.calc_roi_id = calc_roi.id
+      INNER JOIN customers ON calc_roi.customer_id = customers.id
+      ${whereSql}
+      GROUP BY logs_calc_roi.calc_roi_id, calc_roi.customer_id, customers.id, customers.first_name, customers.last_name, customers.company_name
+      ORDER BY ${orderByClause}
+      LIMIT :limitValue OFFSET :offset`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: { ...replacements, limitValue, offset }
+      }
+    );
 
     // Calculate sales gap and format data
     const formattedData = underperformingData.map((item) => {
-      const calcRoi = calcRoiMap[item.calc_roi_id];
-      const customer = calcRoi?.customer;
       const totalMinimumSalesRequired = parseFloat(
-        item.dataValues.total_minimum_sales_required || 0
+        item.total_minimum_sales_required || 0
       );
       const totalActualSales = parseFloat(
-        item.dataValues.total_actual_sales || 0
+        item.total_actual_sales || 0
       );
       const salesGap = Math.max(
         0,
         totalMinimumSalesRequired - totalActualSales
       );
       const status = salesGap > 0 ? "Not Met" : "Met";
-      const calculationCount = parseInt(item.dataValues.calculation_count || 0);
+      const calculationCount = parseInt(item.calculation_count || 0);
+
+      const customerName = item.first_name && item.last_name
+        ? `${item.first_name} ${item.last_name}`.trim()
+        : item.company_name || "Unknown Customer";
 
       return {
-        customer_id: customer?.id || null,
-        customer_name: customer
-          ? `${customer.first_name} ${customer.last_name}`.trim() ||
-            customer.company_name
-          : "Unknown Customer",
+        customer_id: item.customer_id || null,
+        customer_name: customerName,
         minimum_sales_required: totalMinimumSalesRequired,
         actual_sales: totalActualSales,
         sales_gap: salesGap,
@@ -1238,22 +844,18 @@ exports.getUnderperformingCustomersReports = async (req, res) => {
       });
     }
 
-    // Get total count for pagination
-    const totalCountResult = await LogsCalcRoi.findAll({
-      attributes: [
-        [
-          Sequelize.fn(
-            "COUNT",
-            Sequelize.fn("DISTINCT", Sequelize.col("calc_roi_id"))
-          ),
-          "count",
-        ],
-      ],
-      where: whereClause,
-      raw: true,
-    });
+    // Get total count for pagination using raw query
+    const totalCountResult = await LogsCalcRoi.sequelize.query(
+      `SELECT COUNT(DISTINCT logs_calc_roi.calc_roi_id) as count
+      FROM logs_calc_roi
+      ${whereSql}`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: replacements
+      }
+    );
 
-    const totalCount = totalCountResult[0]?.count || 0;
+    const totalCount = parseInt(totalCountResult[0]?.count || 0);
 
     const response = {
       data: formattedData,
@@ -1299,92 +901,65 @@ exports.getOutstandingPerformanceCustomersReports = async (req, res) => {
 
     // Calculate offset for pagination
     const offset = (parseInt(page) - 1) * parseInt(limit);
+    const limitValue = parseInt(limit);
 
-    // Build where clause for year filter
-    let whereClause = {};
+    // Build where conditions for raw query
+    let whereConditions = [];
+    let replacements = {};
+
+    // Year filter
     if (year) {
-      whereClause[Sequelize.Op.and] = [
-        Sequelize.where(
-          Sequelize.fn("YEAR", Sequelize.col("logs_calc_roi.created_at")),
-          year
-        ),
-      ];
+      whereConditions.push("YEAR(logs_calc_roi.created_at) = :year");
+      replacements.year = parseInt(year);
     }
 
-    // Get outstanding performance customers data from logs_calc_roi
-    const outstandingData = await LogsCalcRoi.findAll({
-      attributes: [
-        "calc_roi_id",
-        [
-          Sequelize.fn(
-            "SUM",
-            Sequelize.col("logs_calc_roi.monthly_sales_required")
-          ),
-          "total_target_sales",
-        ],
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.total_sales")),
-          "total_actual_sales",
-        ],
-        [
-          Sequelize.fn("COUNT", Sequelize.col("logs_calc_roi.id")),
-          "calculation_count",
-        ],
-      ],
-      where: whereClause,
-      group: ["calc_roi_id"],
-      order: [
-        [
-          Sequelize.col(
-            sort_by === "performance_percentage"
-              ? "total_actual_sales"
-              : "total_actual_sales"
-          ),
-          sort_order.toUpperCase(),
-        ],
-      ],
-      limit: parseInt(limit),
-      offset: offset,
-    });
+    const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
 
-    // Get customer details separately for better performance
-    const calcRoiIds = [
-      ...new Set(outstandingData.map((item) => item.calc_roi_id)),
-    ];
-    const calcRoiData = await CalcRoi.findAll({
-      where: {
-        id: {
-          [Sequelize.Op.in]: calcRoiIds,
-        },
-      },
-      include: [
-        {
-          model: Customers,
-          as: "customer",
-          attributes: ["id", "first_name", "last_name", "company_name"],
-        },
-      ],
-    });
+    // Determine order by clause
+    let orderByClause = "total_actual_sales DESC";
+    if (sort_by === "performance_percentage") {
+      // We'll sort by performance_percentage after calculating it
+      orderByClause = "total_actual_sales " + (sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC");
+    } else {
+      orderByClause = "total_actual_sales " + (sort_order.toUpperCase() === "ASC" ? "ASC" : "DESC");
+    }
 
-    // Create a map for quick lookup
-    const calcRoiMap = {};
-    calcRoiData.forEach((roi) => {
-      calcRoiMap[roi.id] = roi;
-    });
+    // Get outstanding performance customers data from logs_calc_roi using raw query
+    const outstandingData = await LogsCalcRoi.sequelize.query(
+      `SELECT 
+        logs_calc_roi.calc_roi_id,
+        SUM(logs_calc_roi.monthly_sales_required) as total_target_sales,
+        SUM(logs_calc_roi.total_sales) as total_actual_sales,
+        COUNT(logs_calc_roi.id) as calculation_count,
+        calc_roi.customer_id,
+        customers.id as customer_id,
+        customers.first_name,
+        customers.last_name,
+        customers.company_name
+      FROM logs_calc_roi
+      INNER JOIN calc_roi ON logs_calc_roi.calc_roi_id = calc_roi.id
+      INNER JOIN customers ON calc_roi.customer_id = customers.id
+      ${whereSql}
+      GROUP BY logs_calc_roi.calc_roi_id, calc_roi.customer_id, customers.id, customers.first_name, customers.last_name, customers.company_name
+      ORDER BY ${orderByClause}
+      LIMIT :limitValue OFFSET :offset`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: { ...replacements, limitValue, offset }
+      }
+    );
 
     // Calculate performance metrics and format data
     const formattedData = outstandingData
       .map((item) => {
-        const calcRoi = calcRoiMap[item.calc_roi_id];
-        const customer = calcRoi?.customer;
         const totalTargetSales = parseFloat(
-          item.dataValues.total_target_sales || 0
+          item.total_target_sales || 0
         );
         const totalActualSales = parseFloat(
-          item.dataValues.total_actual_sales || 0
+          item.total_actual_sales || 0
         );
         const calculationCount = parseInt(
-          item.dataValues.calculation_count || 0
+          item.calculation_count || 0
         );
 
         // Calculate performance metrics
@@ -1397,12 +972,13 @@ exports.getOutstandingPerformanceCustomersReports = async (req, res) => {
           totalActualSales - totalTargetSales
         );
 
+        const customerName = item.first_name && item.last_name
+          ? `${item.first_name} ${item.last_name}`.trim()
+          : item.company_name || "Unknown Customer";
+
         return {
-          customer_id: customer?.id || null,
-          customer_name: customer
-            ? `${customer.first_name} ${customer.last_name}`.trim() ||
-              customer.company_name
-            : "Unknown Customer",
+          customer_id: item.customer_id || null,
+          customer_name: customerName,
           target_sales: totalTargetSales,
           actual_sales: totalActualSales,
           performance_percentage: parseFloat(performancePercentage.toFixed(1)),
@@ -1427,26 +1003,20 @@ exports.getOutstandingPerformanceCustomersReports = async (req, res) => {
       });
     }
 
-    // Get total count for pagination (only count customers who exceeded targets)
-    const allOutstandingData = await LogsCalcRoi.findAll({
-      attributes: [
-        "calc_roi_id",
-        [
-          Sequelize.fn(
-            "SUM",
-            Sequelize.col("logs_calc_roi.monthly_sales_required")
-          ),
-          "total_target_sales",
-        ],
-        [
-          Sequelize.fn("SUM", Sequelize.col("logs_calc_roi.total_sales")),
-          "total_actual_sales",
-        ],
-      ],
-      where: whereClause,
-      group: ["calc_roi_id"],
-      raw: true,
-    });
+    // Get total count for pagination (only count customers who exceeded targets) using raw query
+    const allOutstandingData = await LogsCalcRoi.sequelize.query(
+      `SELECT 
+        logs_calc_roi.calc_roi_id,
+        SUM(logs_calc_roi.monthly_sales_required) as total_target_sales,
+        SUM(logs_calc_roi.total_sales) as total_actual_sales
+      FROM logs_calc_roi
+      ${whereSql}
+      GROUP BY logs_calc_roi.calc_roi_id`,
+      {
+        type: Sequelize.QueryTypes.SELECT,
+        replacements: replacements
+      }
+    );
 
     // Filter to only include customers who exceeded targets
     const outstandingCustomers = allOutstandingData.filter((item) => {

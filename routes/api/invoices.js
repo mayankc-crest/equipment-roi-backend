@@ -27,6 +27,15 @@ router.get("/sales-percentage", invoicesCtrl.getSalesPercentageByYear);
 
 router.get("/invoice-calculate/:id", invoicesCtrl.getInvoiceCalculateForView);
 
+
+
+/**
+ * @description Get month-wise sales data for a calc_roi
+ * @path /api/invoices/month-wise-sales?calc_roi_id=1
+ * @method GET
+ * @query {number} calc_roi_id - Calc ROI ID
+ */
+router.get("/month-wise-sales", invoicesCtrl.getMonthWiseSales);
 /**
  * @description Get invoice by ID
  * @path /api/invoices/:id
